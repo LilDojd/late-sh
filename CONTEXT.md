@@ -591,6 +591,7 @@ An always-running game where every connected SSH session is automatically a part
 
 ### Bonsai Tree Enhancements
 - Seasonal color shifts (real-world date), profile display for visitors, graveyard rendering on profile.
+- Fancier renderer — possibly port/adapt `cbonsai` (https://github.com/mhzawadi/homebrew-cbonsai) for richer growth animation and branching.
 
 ### GitHub Notifications Widget
 - Read-only dashboard widget showing PR reviews, mentions, issue updates via PAT.
