@@ -3,6 +3,7 @@ mod cli;
 mod identity;
 mod legacy;
 mod logging;
+mod pair;
 mod ssh;
 
 #[tokio::main]
