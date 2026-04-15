@@ -45,6 +45,6 @@ opentelemetry-appender-tracing = "0.31.1"
 [profile.release]
 # Strip debug info but keep symbols for readable panic stack traces
 strip = "debuginfo"
-
-# Use Thin LTO for a balance of compilation speed and runtime performance
-lto = "thin"
+lto = "fat"
+codegen-units = 1
+opt-level = "z"

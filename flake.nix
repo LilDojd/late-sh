@@ -45,6 +45,9 @@
           "rust-analyzer"
           "llvm-tools-preview"
         ];
+        targets = [
+          "x86_64-pc-windows-gnu"
+        ];
       };
 
       # But, whenever we are running CI builds or checks, we want to use a
@@ -85,10 +88,15 @@
           # Matches .mise.toml / CONTRIBUTING tooling
           mold
           cargo-nextest
+          cargo-bloat
 
           # Commonly useful cargo helpers
           cargo-llvm-cov
           cargo-watch
+
+          # Cross-compile late-cli to Windows. Provides
+          # `x86_64-w64-mingw32-gcc` referenced by .cargo/config.toml.
+          pkgsCross.mingwW64.stdenv.cc
 
           # late-web frontend tooling
           nodejs
