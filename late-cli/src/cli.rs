@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::Parser;
-use clap_verbosity_flag::{InfoLevel, Verbosity};
+use clap_verbosity_flag::Verbosity;
 use shlex::Shlex;
 use url::Url;
 
@@ -56,7 +56,7 @@ pub struct Args {
     address_family: AddressFamilyFlags,
 
     #[command(flatten)]
-    verbose: Verbosity<InfoLevel>,
+    verbose: Verbosity,
 }
 
 #[derive(Debug, Clone)]
@@ -69,7 +69,7 @@ pub struct Config {
 }
 
 impl Args {
-    pub fn resolve(self) -> Result<(Config, Verbosity<InfoLevel>)> {
+    pub fn resolve(self) -> Result<(Config, Verbosity)> {
         let ssh_bin = parse_ssh_bin_spec(&self.ssh_bin)?;
         let audio_base_url = Url::parse(&self.audio_base_url)
             .with_context(|| format!("invalid --audio-base-url {:?}", self.audio_base_url))?;
