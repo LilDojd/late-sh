@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use clap_verbosity_flag::Verbosity;
-use shlex::Shlex;
 use url::Url;
 
 const DEFAULT_SSH_TARGET: &str = "late.sh";
@@ -43,9 +42,6 @@ pub struct Args {
     #[arg(long, env = "LATE_SSH_TARGET", default_value = DEFAULT_SSH_TARGET)]
     ssh_target: String,
 
-    #[arg(long, env = "LATE_SSH_BIN", default_value = "ssh")]
-    ssh_bin: String,
-
     #[arg(long, env = "LATE_AUDIO_BASE_URL", default_value = DEFAULT_AUDIO_BASE_URL)]
     audio_base_url: String,
 
@@ -61,16 +57,19 @@ pub struct Args {
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    // `ssh_target` and `address_family` are read only by `ssh::spawn`, which
+    // is stubbed during the russh migration (Task 2 restores the real call
+    // sites). Allow dead_code here rather than gating the fields.
+    #[allow(dead_code)]
     pub ssh_target: String,
-    pub ssh_bin: Vec<String>,
     pub audio_base_url: Url,
     pub api_base_url: Url,
+    #[allow(dead_code)]
     pub address_family: AddressFamily,
 }
 
 impl Args {
     pub fn resolve(self) -> Result<(Config, Verbosity)> {
-        let ssh_bin = parse_ssh_bin_spec(&self.ssh_bin)?;
         let audio_base_url = Url::parse(&self.audio_base_url)
             .with_context(|| format!("invalid --audio-base-url {:?}", self.audio_base_url))?;
         let api_base_url = Url::parse(&self.api_base_url)
@@ -79,7 +78,6 @@ impl Args {
         Ok((
             Config {
                 ssh_target: self.ssh_target,
-                ssh_bin,
                 audio_base_url,
                 api_base_url,
                 address_family,
@@ -89,31 +87,10 @@ impl Args {
     }
 }
 
-fn parse_ssh_bin_spec(spec: &str) -> Result<Vec<String>> {
-    let parts: Vec<String> = Shlex::new(spec).collect();
-    if parts.is_empty() {
-        anyhow::bail!("ssh client command cannot be empty");
-    }
-    Ok(parts)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use clap::CommandFactory;
-
-    #[test]
-    fn parse_ssh_bin_spec_splits_command_and_args() {
-        assert_eq!(
-            parse_ssh_bin_spec("ssh -p 2222").unwrap(),
-            vec!["ssh".to_string(), "-p".to_string(), "2222".to_string()],
-        );
-    }
-
-    #[test]
-    fn parse_ssh_bin_spec_rejects_empty() {
-        assert!(parse_ssh_bin_spec("").is_err());
-    }
 
     #[test]
     fn resolve_parses_urls_and_defaults_to_auto_family() {
