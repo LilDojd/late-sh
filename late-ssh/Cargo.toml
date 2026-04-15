@@ -36,7 +36,7 @@ base64 = "0.22"
 vte = "0.15"
 
 # SSH
-russh = "0.56.0"
+russh.workspace = true
 
 # Web / HTTP
 axum = { workspace = true, features = ["ws"] }

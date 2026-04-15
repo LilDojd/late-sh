@@ -27,7 +27,7 @@ url = "2"
 futures-util = "0.3"
 libc = "0.2"
 reqwest = { workspace = true, features = ["blocking"] }
-russh = "0.56"
+russh.workspace = true
 rustfft = "6.4.1"
 symphonia = { version = "0.5.5", features = ["mp3"] }
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
