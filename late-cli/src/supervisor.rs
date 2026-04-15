@@ -1,82 +1,62 @@
 use anyhow::Result;
-use std::process::ExitStatus;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tokio::process::Child;
 use tokio::task::JoinHandle;
 
 use crate::audio::AudioRuntime;
-use crate::ssh::SshProcess;
-use crate::ssh::pty::PtyResizeHandle;
+use crate::ssh::{self, SshSession};
 
 #[derive(Debug)]
 pub enum Outcome {
     CleanExit,
-    SshBeforeHandshake(ExitStatus),
-    SshAfterHandshake(ExitStatus),
+    SshBeforeHandshake(Option<u32>),
+    SshAfterHandshake(Option<u32>),
     PairLoopFailed(anyhow::Error),
 }
 
 pub async fn run(
     audio: AudioRuntime,
-    ssh: SshProcess,
-    resize_task: JoinHandle<()>,
+    ssh_session: SshSession,
     pair_task: JoinHandle<Result<()>>,
     handshake_done: Arc<AtomicBool>,
 ) -> Result<Outcome> {
-    let SshProcess {
-        mut child,
-        output_task,
-        input_task,
-        resize_handle,
-        input_gate: _,
-    } = ssh;
+    let SshSession {
+        handle,
+        mut output_task,
+        resize_task,
+        stdin_task,
+        mut exit_rx,
+        cmd_tx,
+    } = ssh_session;
 
     let mut pair_task = pair_task;
-    // After the select fires, we track whether output_task is already consumed
-    // (awaited to completion) so teardown skips re-awaiting it.
-    let mut output_task_opt = Some(output_task);
+
     let outcome = tokio::select! {
         biased;
-        status = child.wait() => match status {
-            Ok(status) => {
-                // If the stdout-forwarding task has already finished, await it here
-                // to determine whether it closed cleanly. This matches legacy
-                // behavior at legacy.rs:563-567 where ssh exit 255 + clean stdout
-                // close is treated as a clean session end.
-                let mut output_task = output_task_opt.take().unwrap();
-                let stdout_closed_cleanly = if output_task.is_finished() {
-                    match (&mut output_task).await {
-                        Ok(Ok(())) => Some(true),
-                        _ => Some(false),
-                    }
-                } else {
-                    // Output task still running — either the PTY is still open or
-                    // the child just died and the forwarder is about to EOF. We do
-                    // not want to block here, so put the handle back for teardown
-                    // and report that stdout has not been confirmed as cleanly closed.
-                    output_task_opt = Some(output_task);
-                    Some(false)
-                };
-                classify_exit(status, handshake_done.load(Ordering::Relaxed), stdout_closed_cleanly)
+        exit = &mut exit_rx => {
+            let status = exit.unwrap_or(None);
+            classify_exit(status, handshake_done.load(Ordering::Relaxed), None)
+        }
+        join = &mut output_task => {
+            match join {
+                Ok(Ok(())) if !handshake_done.load(Ordering::Relaxed) => {
+                    Outcome::SshBeforeHandshake(None)
+                }
+                Ok(Ok(())) => Outcome::CleanExit,
+                Ok(Err(err)) => Outcome::PairLoopFailed(err.context("ssh stdout forwarding failed")),
+                Err(err) => Outcome::PairLoopFailed(anyhow::anyhow!("ssh stdout task join failed: {err}")),
             }
-            Err(err) => return Err(err.into()),
-        },
-        result = poll_output_task(&mut output_task_opt) => {
-            let outcome = handle_output_end(result, handshake_done.load(Ordering::Relaxed));
-            output_task_opt = None; // consumed by the select
-            outcome
         }
         result = &mut pair_task => handle_pair_end(result),
     };
 
     teardown(
         &audio,
-        &mut child,
-        &resize_handle,
-        output_task_opt,
-        input_task,
+        &handle,
+        &cmd_tx,
+        output_task,
+        stdin_task,
         resize_task,
         pair_task,
     )
@@ -84,18 +64,8 @@ pub async fn run(
     Ok(outcome)
 }
 
-async fn poll_output_task(
-    opt: &mut Option<JoinHandle<Result<()>>>,
-) -> std::result::Result<Result<()>, tokio::task::JoinError> {
-    if let Some(h) = opt {
-        h.await
-    } else {
-        std::future::pending().await
-    }
-}
-
 pub fn classify_exit(
-    status: ExitStatus,
+    status: Option<u32>,
     handshake_done: bool,
     stdout_closed_cleanly: Option<bool>,
 ) -> Outcome {
@@ -104,22 +74,14 @@ pub fn classify_exit(
     }
 
     let stdout_closed = stdout_closed_cleanly.unwrap_or(false);
-    if status.success() || (status.code() == Some(255) && stdout_closed) {
-        Outcome::CleanExit
-    } else {
-        Outcome::SshAfterHandshake(status)
-    }
-}
-
-fn handle_output_end(
-    result: std::result::Result<Result<()>, tokio::task::JoinError>,
-    handshake_done: bool,
-) -> Outcome {
-    match result {
-        Ok(Ok(())) if !handshake_done => Outcome::SshBeforeHandshake(fake_exit_status(0)),
-        Ok(Ok(())) => Outcome::CleanExit,
-        Ok(Err(err)) => Outcome::PairLoopFailed(err.context("ssh stdout forwarding failed")),
-        Err(err) => Outcome::PairLoopFailed(anyhow::anyhow!("ssh stdout task join failed: {err}")),
+    match status {
+        Some(0) => Outcome::CleanExit,
+        // russh delivers a `u32` exit status; 255 with a cleanly closed stdout
+        // mirrors the legacy OpenSSH "connection closed" signalling we
+        // previously treated as benign.
+        Some(255) if stdout_closed => Outcome::CleanExit,
+        None if stdout_closed => Outcome::CleanExit,
+        _ => Outcome::SshAfterHandshake(status),
     }
 }
 
@@ -131,72 +93,79 @@ fn handle_pair_end(result: std::result::Result<Result<()>, tokio::task::JoinErro
     }
 }
 
-pub(crate) fn fake_exit_status(code: i32) -> ExitStatus {
-    use std::os::unix::process::ExitStatusExt;
-    ExitStatus::from_raw((code & 0xff) << 8)
-}
-
 async fn teardown(
     audio: &AudioRuntime,
-    child: &mut Child,
-    _resize_handle: &PtyResizeHandle,
-    output_task: Option<JoinHandle<Result<()>>>,
-    input_task: JoinHandle<Result<()>>,
+    handle: &russh::client::Handle<ssh::Client>,
+    cmd_tx: &tokio::sync::mpsc::Sender<ssh::ChannelCmd>,
+    output_task: JoinHandle<Result<()>>,
+    stdin_task: Option<JoinHandle<Result<()>>>,
     resize_task: JoinHandle<()>,
     pair_task: JoinHandle<Result<()>>,
 ) {
     audio.shutdown();
     pair_task.abort();
-    input_task.abort();
+    if let Some(stdin_task) = stdin_task {
+        stdin_task.abort();
+    }
     resize_task.abort();
 
-    if let Err(err) = child.start_kill() {
-        tracing::debug!(error = ?err, "ssh already dead or un-killable");
-    }
-    let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
+    // Politely tell the output task to close the channel; then ensure the ssh
+    // handle drops the underlying transport.
+    let _ = cmd_tx.send(ssh::ChannelCmd::Close).await;
+    ssh::disconnect(handle).await;
 
-    if let Some(output_task) = output_task {
-        output_task.abort();
-        let _ = tokio::time::timeout(Duration::from_secs(2), output_task).await;
-    }
+    let _ = tokio::time::timeout(Duration::from_secs(2), output_task).await;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::process::ExitStatusExt;
-
-    fn status(code: i32) -> ExitStatus {
-        ExitStatus::from_raw((code & 0xff) << 8)
-    }
 
     #[test]
     fn exit_before_handshake_is_before_handshake() {
-        let o = classify_exit(status(1), false, None);
-        assert!(matches!(o, Outcome::SshBeforeHandshake(_)));
+        let o = classify_exit(Some(1), false, None);
+        assert!(matches!(o, Outcome::SshBeforeHandshake(Some(1))));
+    }
+
+    #[test]
+    fn none_exit_before_handshake_is_before_handshake() {
+        let o = classify_exit(None, false, None);
+        assert!(matches!(o, Outcome::SshBeforeHandshake(None)));
     }
 
     #[test]
     fn success_after_handshake_is_clean() {
-        let o = classify_exit(status(0), true, None);
+        let o = classify_exit(Some(0), true, None);
         assert!(matches!(o, Outcome::CleanExit));
     }
 
     #[test]
     fn code_255_after_handshake_with_clean_stdout_is_clean() {
-        let o = classify_exit(status(255), true, Some(true));
+        let o = classify_exit(Some(255), true, Some(true));
         assert!(matches!(o, Outcome::CleanExit));
     }
 
     #[test]
     fn code_255_after_handshake_without_clean_stdout_is_after_handshake() {
-        let o = classify_exit(status(255), true, Some(false));
-        assert!(matches!(o, Outcome::SshAfterHandshake(_)));
+        let o = classify_exit(Some(255), true, Some(false));
+        assert!(matches!(o, Outcome::SshAfterHandshake(Some(255))));
     }
 
     #[test]
     fn nonzero_after_handshake_is_after_handshake() {
-        let o = classify_exit(status(42), true, None);
-        assert!(matches!(o, Outcome::SshAfterHandshake(_)));
+        let o = classify_exit(Some(42), true, None);
+        assert!(matches!(o, Outcome::SshAfterHandshake(Some(42))));
+    }
+
+    #[test]
+    fn missing_status_after_handshake_with_clean_stdout_is_clean() {
+        let o = classify_exit(None, true, Some(true));
+        assert!(matches!(o, Outcome::CleanExit));
+    }
+
+    #[test]
+    fn missing_status_after_handshake_without_clean_stdout_is_after_handshake() {
+        let o = classify_exit(None, true, None);
+        assert!(matches!(o, Outcome::SshAfterHandshake(None)));
     }
 }

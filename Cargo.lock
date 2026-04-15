@@ -2627,7 +2627,6 @@ dependencies = [
  "crossterm",
  "dirs",
  "futures-util",
- "nix",
  "reqwest 0.13.1",
  "russh",
  "rustfft",

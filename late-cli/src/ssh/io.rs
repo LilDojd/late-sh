@@ -1,77 +1,115 @@
-use super::banner::{BannerParser, Event};
+use crate::ssh::ChannelCmd;
+use crate::ssh::banner::{BannerParser, Event};
 use anyhow::Result;
-use nix::libc;
-use std::fs;
-use std::io::{self, IsTerminal, Read, Write};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::oneshot;
+use russh::client::Msg;
+use russh::{Channel, ChannelMsg};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::{mpsc, oneshot};
 
-pub fn forward_output(mut pty: fs::File, token_tx: oneshot::Sender<String>) -> Result<()> {
+/// Output forwarding task. Owns the russh channel, services stdin/resize
+/// commands from the mpsc, and relays channel data to stdout via the banner
+/// parser. The remote exit status is delivered once via `exit_tx`; if the
+/// channel closes without one, `None` is sent.
+pub async fn forward_output(
+    mut channel: Channel<Msg>,
+    token_tx: oneshot::Sender<String>,
+    mut cmd_rx: mpsc::Receiver<ChannelCmd>,
+    exit_tx: oneshot::Sender<Option<u32>>,
+) -> Result<()> {
     let mut parser = BannerParser::new();
-    let mut buf = [0u8; 4096];
-    let mut out = std::io::stdout();
+    let mut stdout = tokio::io::stdout();
     let mut token_tx = Some(token_tx);
+    let mut exit_tx = Some(exit_tx);
 
     loop {
-        let n = match pty.read(&mut buf) {
-            Ok(n) => n,
-            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-            Err(err) => return Err(err.into()),
-        };
-        if n == 0 {
-            break;
-        }
-
-        for event in parser.feed(&buf[..n]) {
-            match event {
-                Event::Token(token) => {
-                    if let Some(tx) = token_tx.take() {
-                        let _ = tx.send(token);
-                        tracing::debug!("captured cli session token banner");
+        tokio::select! {
+            maybe_msg = channel.wait() => {
+                let Some(msg) = maybe_msg else { break; };
+                match msg {
+                    ChannelMsg::Data { ref data } => {
+                        for event in parser.feed(data.as_ref()) {
+                            match event {
+                                Event::Token(token) => {
+                                    if let Some(tx) = token_tx.take() {
+                                        let _ = tx.send(token);
+                                        tracing::debug!("captured cli session token banner");
+                                    }
+                                }
+                                Event::Passthrough(bytes) => {
+                                    stdout.write_all(&bytes).await?;
+                                    stdout.flush().await?;
+                                }
+                            }
+                        }
                     }
+                    ChannelMsg::ExtendedData { ref data, .. } => {
+                        stdout.write_all(data.as_ref()).await?;
+                        stdout.flush().await?;
+                    }
+                    ChannelMsg::ExitStatus { exit_status } => {
+                        if let Some(tx) = exit_tx.take() {
+                            let _ = tx.send(Some(exit_status));
+                        }
+                    }
+                    ChannelMsg::Eof | ChannelMsg::Close => break,
+                    _ => {}
                 }
-                Event::Passthrough(bytes) => {
-                    out.write_all(&bytes)?;
-                    out.flush()?;
+            }
+            maybe_cmd = cmd_rx.recv() => {
+                let Some(cmd) = maybe_cmd else { break; };
+                match cmd {
+                    ChannelCmd::Stdin(bytes) => {
+                        if let Err(err) = channel.data(&bytes[..]).await {
+                            tracing::debug!(error = ?err, "failed to forward stdin to ssh channel");
+                            break;
+                        }
+                    }
+                    ChannelCmd::Resize { cols, rows } => {
+                        if let Err(err) = channel
+                            .window_change(cols as u32, rows as u32, 0, 0)
+                            .await
+                        {
+                            tracing::debug!(error = ?err, "failed to send window_change");
+                        }
+                    }
+                    ChannelCmd::Eof => {
+                        let _ = channel.eof().await;
+                    }
+                    ChannelCmd::Close => break,
                 }
             }
         }
     }
 
+    if let Some(tx) = exit_tx.take() {
+        let _ = tx.send(None);
+    }
     Ok(())
 }
 
-pub fn forward_stdin(mut pty: fs::File, input_gate: Arc<AtomicBool>) -> Result<()> {
-    let mut stdin = std::io::stdin().lock();
-    let mut buf = [0u8; 4096];
+/// Stdin forwarding task. Reads the local tty into 4KiB chunks and relays them
+/// as `ChannelCmd::Stdin(..)` messages so the channel stays owned by the
+/// output task.
+pub async fn forward_stdin(cmd_tx: mpsc::Sender<ChannelCmd>) -> Result<()> {
+    let mut stdin = tokio::io::stdin();
+    let mut buf = vec![0u8; 4096];
     loop {
-        let n = match stdin.read(&mut buf) {
-            Ok(n) => n,
-            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+        match stdin.read(&mut buf).await {
+            Ok(0) => {
+                let _ = cmd_tx.send(ChannelCmd::Eof).await;
+                break;
+            }
+            Ok(n) => {
+                if cmd_tx
+                    .send(ChannelCmd::Stdin(buf[..n].to_vec()))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
             Err(err) => return Err(err.into()),
-        };
-        if n == 0 {
-            break;
         }
-        if !input_gate.load(Ordering::Relaxed) {
-            continue;
-        }
-        pty.write_all(&buf[..n])?;
     }
     Ok(())
-}
-
-pub fn flush_stdin_input_queue() {
-    if !std::io::stdin().is_terminal() {
-        return;
-    }
-
-    let rc = unsafe { libc::tcflush(libc::STDIN_FILENO, libc::TCIFLUSH) };
-    if rc == -1 {
-        tracing::debug!(
-            error = ?io::Error::last_os_error(),
-            "failed to flush pending stdin before enabling ssh input"
-        );
-    }
 }

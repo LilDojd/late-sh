@@ -57,14 +57,9 @@ pub struct Args {
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    // `ssh_target` and `address_family` are read only by `ssh::spawn`, which
-    // is stubbed during the russh migration (Task 2 restores the real call
-    // sites). Allow dead_code here rather than gating the fields.
-    #[allow(dead_code)]
     pub ssh_target: String,
     pub audio_base_url: Url,
     pub api_base_url: Url,
-    #[allow(dead_code)]
     pub address_family: AddressFamily,
 }
 

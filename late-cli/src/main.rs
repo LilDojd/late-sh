@@ -18,9 +18,7 @@ use tokio::sync::oneshot;
 
 use crate::audio::AudioRuntime;
 use crate::pair::PairShared;
-use crate::ssh::io::flush_stdin_input_queue;
-use crate::ssh::pty::forward_resize_events;
-use crate::supervisor::{Outcome, fake_exit_status};
+use crate::supervisor::Outcome;
 
 struct RawModeGuard(bool);
 
@@ -78,24 +76,22 @@ async fn run() -> Result<ExitCode> {
 
     tracing::info!("starting ssh session");
     let (token_tx, token_rx) = oneshot::channel();
-    let mut ssh_process = ssh::spawn(&config, &identity_path, token_tx).await?;
-    let resize_task = tokio::spawn(forward_resize_events(ssh_process.resize_handle.clone()));
+    let mut ssh_session = ssh::connect(&config, &identity_path, token_tx).await?;
 
-    // Wait for token OR an early SSH exit, whichever happens first.
+    // Wait for the token OR an early exit from the output task / exit channel.
     let token = {
-        let child = &mut ssh_process.child;
-        let output_task = &mut ssh_process.output_task;
+        let output_task = &mut ssh_session.output_task;
+        let exit_rx = &mut ssh_session.exit_rx;
         tokio::select! {
             biased;
-            status = child.wait() => {
-                // SSH child died before we got the banner.
-                return Ok(report(Outcome::SshBeforeHandshake(status?)));
+            exit = exit_rx => {
+                let status = exit.ok().flatten();
+                return Ok(report(Outcome::SshBeforeHandshake(status)));
             }
             result = output_task => {
-                // Output task ended before we got the banner (stdout closed / failed).
                 match result {
                     Ok(Ok(())) => {
-                        return Ok(report(Outcome::SshBeforeHandshake(fake_exit_status(0))));
+                        return Ok(report(Outcome::SshBeforeHandshake(None)));
                     }
                     Ok(Err(err)) => return Err(err.context("ssh stdout forwarding failed before handshake")),
                     Err(err) => return Err(anyhow::anyhow!("ssh stdout task join failed before handshake: {err}")),
@@ -109,9 +105,13 @@ async fn run() -> Result<ExitCode> {
         }
     };
 
-    flush_stdin_input_queue();
-    ssh_process.input_gate.store(true, Ordering::Relaxed);
+    // Pre-handshake keystrokes were not being forwarded (stdin task wasn't
+    // running); any bytes the kernel buffered remain available for the TUI
+    // that's about to start. Spawning stdin now mirrors the legacy
+    // `input_gate` flip at the same point in the flow.
+    ssh_session.spawn_stdin();
     let handshake_done = Arc::new(AtomicBool::new(true));
+    handshake_done.store(true, Ordering::Relaxed);
     tracing::info!("received session token and starting websocket pairing");
 
     let shared = PairShared {
@@ -124,8 +124,7 @@ async fn run() -> Result<ExitCode> {
     let api_base_url = config.api_base_url.clone();
     let pair_task = tokio::spawn(pair::run_loop(api_base_url, token, frames, shared));
 
-    let outcome =
-        supervisor::run(audio, ssh_process, resize_task, pair_task, handshake_done).await?;
+    let outcome = supervisor::run(audio, ssh_session, pair_task, handshake_done).await?;
 
     Ok(report(outcome))
 }
@@ -135,17 +134,28 @@ fn report(outcome: Outcome) -> ExitCode {
         Outcome::CleanExit => ExitCode::from(0),
         Outcome::SshBeforeHandshake(status) => {
             eprintln!(
-                "error: ssh exited (status {status}) before the session started. Try: late -4"
+                "error: ssh exited (status {}) before the session started. Try: late -4",
+                format_status(status)
             );
             ExitCode::from(2)
         }
         Outcome::SshAfterHandshake(status) => {
-            eprintln!("error: ssh session ended with status {status}");
+            eprintln!(
+                "error: ssh session ended with status {}",
+                format_status(status)
+            );
             ExitCode::from(1)
         }
         Outcome::PairLoopFailed(err) => {
             eprintln!("error: visualizer pairing failed: {err:#}");
             ExitCode::from(4)
         }
+    }
+}
+
+fn format_status(status: Option<u32>) -> String {
+    match status {
+        Some(code) => code.to_string(),
+        None => "unknown".to_string(),
     }
 }
