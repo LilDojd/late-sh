@@ -131,7 +131,7 @@ fn handle_pair_end(result: std::result::Result<Result<()>, tokio::task::JoinErro
     }
 }
 
-fn fake_exit_status(code: i32) -> ExitStatus {
+pub(crate) fn fake_exit_status(code: i32) -> ExitStatus {
     use std::os::unix::process::ExitStatusExt;
     ExitStatus::from_raw((code & 0xff) << 8)
 }

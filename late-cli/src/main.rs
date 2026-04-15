@@ -20,7 +20,7 @@ use crate::audio::AudioRuntime;
 use crate::pair::PairShared;
 use crate::ssh::io::flush_stdin_input_queue;
 use crate::ssh::pty::forward_resize_events;
-use crate::supervisor::Outcome;
+use crate::supervisor::{Outcome, fake_exit_status};
 
 struct RawModeGuard(bool);
 
@@ -78,18 +78,34 @@ async fn run() -> Result<ExitCode> {
 
     tracing::info!("starting ssh session");
     let (token_tx, token_rx) = oneshot::channel();
-    let ssh_process = ssh::spawn(&config, &identity_path, token_tx).await?;
+    let mut ssh_process = ssh::spawn(&config, &identity_path, token_tx).await?;
     let resize_task = tokio::spawn(forward_resize_events(ssh_process.resize_handle.clone()));
 
     // Wait for token OR an early SSH exit, whichever happens first.
-    let token = tokio::select! {
-        token = tokio::time::timeout(Duration::from_secs(10), token_rx) => {
-            token
-                .context(
-                    "timed out waiting for SSH session token (is the server reachable? \
-                     try: ssh late.sh, or rerun with -4)"
-                )?
-                .context("ssh session token channel closed")?
+    let token = {
+        let child = &mut ssh_process.child;
+        let output_task = &mut ssh_process.output_task;
+        tokio::select! {
+            biased;
+            status = child.wait() => {
+                // SSH child died before we got the banner.
+                return Ok(report(Outcome::SshBeforeHandshake(status?)));
+            }
+            result = output_task => {
+                // Output task ended before we got the banner (stdout closed / failed).
+                match result {
+                    Ok(Ok(())) => {
+                        return Ok(report(Outcome::SshBeforeHandshake(fake_exit_status(0))));
+                    }
+                    Ok(Err(err)) => return Err(err.context("ssh stdout forwarding failed before handshake")),
+                    Err(err) => return Err(anyhow::anyhow!("ssh stdout task join failed before handshake: {err}")),
+                }
+            }
+            token = tokio::time::timeout(Duration::from_secs(10), token_rx) => {
+                token
+                    .context("timed out waiting for SSH session token before handshake. Try: late -4")?
+                    .context("ssh session token channel closed")?
+            }
         }
     };
 
