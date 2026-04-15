@@ -17,7 +17,6 @@ use tokio::sync::oneshot;
 
 use crate::audio::AudioRuntime;
 use crate::pair::PairShared;
-use crate::ssh::io::flush_stdin_input_queue;
 use crate::supervisor::Outcome;
 
 struct RawModeGuard(bool);
@@ -62,6 +61,11 @@ async fn run() -> Result<ExitCode> {
     logging::init(&verbosity)?;
     tracing::debug!(?config, "resolved cli config");
 
+    // Probe ssh-agent (and possibly prompt the user to generate a dedicated
+    // key) BEFORE raw mode engages — `identity::ensure` uses line-buffered
+    // stdin which would block forever once canonical mode is off.
+    let identity_path = ssh::prepare_identity().await?;
+
     let _raw_mode = RawModeGuard::enable_if_tty();
 
     tracing::info!("starting audio runtime");
@@ -75,11 +79,11 @@ async fn run() -> Result<ExitCode> {
 
     tracing::info!("starting ssh session");
     let (token_tx, token_rx) = oneshot::channel();
-    let mut ssh_session = ssh::connect(&config, token_tx).await?;
+    let mut ssh_session = ssh::connect(&config, identity_path.as_deref(), token_tx).await?;
 
-    // Wait for the token OR an early exit from the output task / exit channel.
+    // Wait for the token OR an early exit from the IO task / exit channel.
     let token = {
-        let output_task = &mut ssh_session.output_task;
+        let io_task = &mut ssh_session.io_task;
         let exit_rx = &mut ssh_session.exit_rx;
         tokio::select! {
             biased;
@@ -87,13 +91,13 @@ async fn run() -> Result<ExitCode> {
                 let status = exit.ok().flatten();
                 return Ok(report(Outcome::SshBeforeHandshake(status)));
             }
-            result = output_task => {
+            result = io_task => {
                 match result {
                     Ok(Ok(())) => {
                         return Ok(report(Outcome::SshBeforeHandshake(None)));
                     }
-                    Ok(Err(err)) => return Err(err.context("ssh stdout forwarding failed before handshake")),
-                    Err(err) => return Err(anyhow::anyhow!("ssh stdout task join failed before handshake: {err}")),
+                    Ok(Err(err)) => return Err(err.context("ssh io loop failed before handshake")),
+                    Err(err) => return Err(anyhow::anyhow!("ssh io task join failed before handshake: {err}")),
                 }
             }
             token = tokio::time::timeout(Duration::from_secs(10), token_rx) => {
@@ -104,13 +108,6 @@ async fn run() -> Result<ExitCode> {
         }
     };
 
-    // Pre-handshake keystrokes were not being forwarded (stdin task wasn't
-    // running), but the kernel has been buffering them in the tty input queue
-    // the whole time. Flush that queue before starting the forwarder so that
-    // impatient keystrokes during the handshake race don't leak into the
-    // remote TUI as spurious input.
-    flush_stdin_input_queue();
-    ssh_session.spawn_stdin();
     tracing::info!("received session token and starting websocket pairing");
 
     let shared = PairShared {

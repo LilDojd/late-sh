@@ -20,11 +20,8 @@ pub async fn run(
 ) -> Result<Outcome> {
     let SshSession {
         handle,
-        mut output_task,
-        resize_task,
-        stdin_task,
+        mut io_task,
         mut exit_rx,
-        cmd_tx,
     } = ssh_session;
 
     let mut pair_task = pair_task;
@@ -35,26 +32,17 @@ pub async fn run(
             let status = exit.unwrap_or(None);
             classify_exit(status)
         }
-        join = &mut output_task => {
+        join = &mut io_task => {
             match join {
                 Ok(Ok(())) => Outcome::CleanExit,
-                Ok(Err(err)) => Outcome::PairLoopFailed(err.context("ssh stdout forwarding failed")),
-                Err(err) => Outcome::PairLoopFailed(anyhow::anyhow!("ssh stdout task join failed: {err}")),
+                Ok(Err(err)) => Outcome::PairLoopFailed(err.context("ssh io loop failed")),
+                Err(err) => Outcome::PairLoopFailed(anyhow::anyhow!("ssh io task join failed: {err}")),
             }
         }
         result = &mut pair_task => handle_pair_end(result),
     };
 
-    teardown(
-        &audio,
-        &handle,
-        &cmd_tx,
-        output_task,
-        stdin_task,
-        resize_task,
-        pair_task,
-    )
-    .await;
+    teardown(&audio, &handle, io_task, pair_task).await;
     Ok(outcome)
 }
 
@@ -79,28 +67,20 @@ fn handle_pair_end(result: std::result::Result<Result<()>, tokio::task::JoinErro
 async fn teardown(
     audio: &AudioRuntime,
     handle: &russh::client::Handle<ssh::Client>,
-    cmd_tx: &tokio::sync::mpsc::Sender<ssh::ChannelCmd>,
-    output_task: JoinHandle<Result<()>>,
-    stdin_task: Option<JoinHandle<Result<()>>>,
-    resize_task: JoinHandle<()>,
+    io_task: JoinHandle<Result<()>>,
     pair_task: JoinHandle<Result<()>>,
 ) {
     audio.shutdown();
     pair_task.abort();
-    if let Some(stdin_task) = stdin_task {
-        stdin_task.abort();
-    }
-    resize_task.abort();
 
-    // Politely tell the output task to close the channel; then ensure the ssh
-    // handle drops the underlying transport.
-    let _ = cmd_tx.send(ssh::ChannelCmd::Close).await;
+    // Drop the underlying transport so the io task's channel.wait() returns
+    // None and the loop exits naturally.
     ssh::disconnect(handle).await;
 
-    // Abort the output task before awaiting so that dropping the JoinHandle on
+    // Abort the io task before awaiting so that dropping the JoinHandle on
     // timeout doesn't just detach it — we actually want it cancelled.
-    output_task.abort();
-    let _ = tokio::time::timeout(Duration::from_secs(2), output_task).await;
+    io_task.abort();
+    let _ = tokio::time::timeout(Duration::from_secs(2), io_task).await;
 }
 
 #[cfg(test)]

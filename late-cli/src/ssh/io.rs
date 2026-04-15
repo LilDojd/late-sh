@@ -1,28 +1,54 @@
-use crate::ssh::ChannelCmd;
 use crate::ssh::banner::{BannerParser, Event};
 use anyhow::Result;
 use russh::client::Msg;
 use russh::{Channel, ChannelMsg};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::{mpsc, oneshot};
+use tokio::signal::unix::{SignalKind, signal};
+use tokio::sync::oneshot;
 
-/// Output forwarding task. Owns the russh channel, services stdin/resize
-/// commands from the mpsc, and relays channel data to stdout via the banner
-/// parser. The remote exit status is delivered once via `exit_tx`; if the
-/// channel closes without one, `None` is sent.
-pub async fn forward_output(
+/// Owns the russh channel and multiplexes.
+// TODO: refactor later
+pub async fn run_io_loop(
     mut channel: Channel<Msg>,
     token_tx: oneshot::Sender<String>,
-    mut cmd_rx: mpsc::Receiver<ChannelCmd>,
     exit_tx: oneshot::Sender<Option<u32>>,
 ) -> Result<()> {
     let mut parser = BannerParser::new();
+    let mut stdin = tokio::io::stdin();
     let mut stdout = tokio::io::stdout();
+    let mut stderr = tokio::io::stderr();
+    let mut buf = vec![0u8; 4096];
     let mut token_tx = Some(token_tx);
     let mut exit_tx = Some(exit_tx);
+    let mut handshake_done = false;
+    let mut stdin_closed = false;
+
+    let mut sigwinch = match signal(SignalKind::window_change()) {
+        Ok(s) => Some(s),
+        Err(err) => {
+            tracing::debug!(error = ?err, "SIGWINCH handler unavailable");
+            None
+        }
+    };
 
     loop {
         tokio::select! {
+            r = stdin.read(&mut buf), if handshake_done && !stdin_closed => {
+                match r {
+                    Ok(0) => {
+                        stdin_closed = true;
+                        if let Err(err) = channel.eof().await {
+                            tracing::debug!(error = ?err, "channel.eof() failed");
+                        }
+                    }
+                    Ok(n) => {
+                        if let Err(err) = channel.data(&buf[..n]).await {
+                            return Err(err.into());
+                        }
+                    }
+                    Err(err) => return Err(err.into()),
+                }
+            }
             maybe_msg = channel.wait() => {
                 let Some(msg) = maybe_msg else { break; };
                 match msg {
@@ -34,6 +60,11 @@ pub async fn forward_output(
                                         let _ = tx.send(token);
                                         tracing::debug!("captured cli session token banner");
                                     }
+                                    // Flush any pre-handshake keystrokes the kernel
+                                    // buffered in the tty input queue before the
+                                    // stdin forwarder starts reading.
+                                    flush_stdin_input_queue();
+                                    handshake_done = true;
                                 }
                                 Event::Passthrough(bytes) => {
                                     stdout.write_all(&bytes).await?;
@@ -43,7 +74,6 @@ pub async fn forward_output(
                         }
                     }
                     ChannelMsg::ExtendedData { ref data, .. } => {
-                        let mut stderr = tokio::io::stderr();
                         stderr.write_all(data.as_ref()).await?;
                         stderr.flush().await?;
                     }
@@ -56,27 +86,13 @@ pub async fn forward_output(
                     _ => {}
                 }
             }
-            maybe_cmd = cmd_rx.recv() => {
-                let Some(cmd) = maybe_cmd else { break; };
-                match cmd {
-                    ChannelCmd::Stdin(bytes) => {
-                        if let Err(err) = channel.data(&bytes[..]).await {
-                            tracing::debug!(error = ?err, "failed to forward stdin to ssh channel");
-                            break;
-                        }
-                    }
-                    ChannelCmd::Resize { cols, rows } => {
-                        if let Err(err) = channel
-                            .window_change(cols as u32, rows as u32, 0, 0)
-                            .await
-                        {
-                            tracing::debug!(error = ?err, "failed to send window_change");
-                        }
-                    }
-                    ChannelCmd::Eof => {
-                        let _ = channel.eof().await;
-                    }
-                    ChannelCmd::Close => break,
+            Some(()) = async { sigwinch.as_mut()?.recv().await }, if sigwinch.is_some() => {
+                let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+                if let Err(err) = channel
+                    .window_change(cols as u32, rows as u32, 0, 0)
+                    .await
+                {
+                    tracing::debug!(error = ?err, cols, rows, "window_change failed");
                 }
             }
         }
@@ -88,9 +104,6 @@ pub async fn forward_output(
     Ok(())
 }
 
-/// Flush any bytes the kernel has buffered on stdin. Called right before the
-/// stdin forwarder starts so that keystrokes mashed during the pre-handshake
-/// race do not leak into the remote TUI as spurious input.
 pub fn flush_stdin_input_queue() {
     use std::io::IsTerminal;
     if !std::io::stdin().is_terminal() {
@@ -104,31 +117,4 @@ pub fn flush_stdin_input_queue() {
             "failed to flush pending stdin before enabling ssh input"
         );
     }
-}
-
-/// Stdin forwarding task. Reads the local tty into 4KiB chunks and relays them
-/// as `ChannelCmd::Stdin(..)` messages so the channel stays owned by the
-/// output task.
-pub async fn forward_stdin(cmd_tx: mpsc::Sender<ChannelCmd>) -> Result<()> {
-    let mut stdin = tokio::io::stdin();
-    let mut buf = vec![0u8; 4096];
-    loop {
-        match stdin.read(&mut buf).await {
-            Ok(0) => {
-                let _ = cmd_tx.send(ChannelCmd::Eof).await;
-                break;
-            }
-            Ok(n) => {
-                if cmd_tx
-                    .send(ChannelCmd::Stdin(buf[..n].to_vec()))
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-            }
-            Err(err) => return Err(err.into()),
-        }
-    }
-    Ok(())
 }
