@@ -15,6 +15,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1.10", features = ["serde", "v7"] }
 
+# Ssh
+russh = { version = "0.56" }
+
 # Async / Runtime
 tokio = { version = "1.49.0", features = ["full"] }
 tokio-util = "0.7"
