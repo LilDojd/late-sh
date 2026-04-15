@@ -6,9 +6,9 @@ use anyhow::{Context, Result};
 use russh::Disconnect;
 use russh::client::{self, Handle};
 use russh::keys::ssh_key::PublicKey;
-use russh::keys::{self, PrivateKeyWithHashAlg};
+use russh::keys::{self, HashAlg, PrivateKeyWithHashAlg};
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::lookup_host;
 use tokio::sync::{mpsc, oneshot};
@@ -137,22 +137,10 @@ async fn resolve_addrs(target: &str, family: AddressFamily) -> Result<Vec<Socket
 /// The returned [`SshSession`] has the output task and resize task already
 /// running; spawn stdin via [`SshSession::spawn_stdin`] once the session token
 /// banner has been observed.
-pub async fn connect(
-    cfg: &Config,
-    identity: &Path,
-    token_tx: oneshot::Sender<String>,
-) -> Result<SshSession> {
+pub async fn connect(cfg: &Config, token_tx: oneshot::Sender<String>) -> Result<SshSession> {
     let (host, port) = parse_target(&cfg.ssh_target);
     let addrs = resolve_addrs(&cfg.ssh_target, cfg.address_family).await?;
     tracing::debug!(?addrs, "resolved ssh target");
-
-    // Load the user's ed25519 private key off the async runtime.
-    let identity_owned: PathBuf = identity.to_path_buf();
-    let key_pair =
-        tokio::task::spawn_blocking(move || keys::load_secret_key(&identity_owned, None))
-            .await
-            .context("key load task panicked")?
-            .with_context(|| format!("failed to load SSH key {}", identity.display()))?;
 
     let config = Arc::new(client::Config::default());
     let client_handler = Client {
@@ -164,22 +152,7 @@ pub async fn connect(
         .await
         .with_context(|| format!("failed to ssh to {host}:{port}"))?;
 
-    let hash_alg = handle
-        .best_supported_rsa_hash()
-        .await
-        .context("failed to negotiate rsa hash algorithm")?
-        .flatten();
-
-    let auth = handle
-        .authenticate_publickey(
-            whoami_or_fallback(),
-            PrivateKeyWithHashAlg::new(Arc::new(key_pair), hash_alg),
-        )
-        .await
-        .context("public key authentication failed")?;
-    if !auth.success() {
-        anyhow::bail!("ssh public key authentication was rejected by the server");
-    }
+    authenticate(&mut handle, &whoami_or_fallback()).await?;
 
     let channel = handle
         .channel_open_session()
@@ -217,6 +190,107 @@ pub async fn connect(
         exit_rx,
         cmd_tx,
     })
+}
+
+/// Authenticate the handle, preferring ssh-agent identities over the dedicated
+/// `~/.ssh/id_late_sh_ed25519` key (which is generated on demand via
+/// [`crate::identity::ensure`]). Mirrors OpenSSH behaviour so that users who
+/// already have an agent-loaded key don't end up with a second identity on the
+/// server.
+async fn authenticate(handle: &mut Handle<Client>, user: &str) -> Result<()> {
+    let hash = handle
+        .best_supported_rsa_hash()
+        .await
+        .context("failed to negotiate rsa hash algorithm")?
+        .flatten();
+
+    let (agent_tried, agent_key_count) = match try_agent_auth(handle, user, hash).await {
+        Ok(AgentAuthOutcome::Success) => return Ok(()),
+        Ok(AgentAuthOutcome::Rejected { tried }) => (true, tried),
+        Err(err) => {
+            tracing::debug!(error = ?err, "ssh-agent unavailable; falling back to dedicated key");
+            (false, 0)
+        }
+    };
+
+    // Fall back to the dedicated key (prompts to generate on first run).
+    let identity_path = crate::identity::ensure()?;
+    let identity_owned: PathBuf = identity_path.clone();
+    let key_pair =
+        tokio::task::spawn_blocking(move || keys::load_secret_key(&identity_owned, None))
+            .await
+            .context("key load task panicked")?
+            .with_context(|| format!("failed to load SSH key {}", identity_path.display()))?;
+
+    let auth = handle
+        .authenticate_publickey(
+            user.to_string(),
+            PrivateKeyWithHashAlg::new(Arc::new(key_pair), hash),
+        )
+        .await
+        .context("public key authentication failed")?;
+
+    if auth.success() {
+        tracing::info!(path = %identity_path.display(), "authenticated via dedicated key");
+        Ok(())
+    } else if agent_tried {
+        anyhow::bail!(
+            "authentication failed (tried {agent_key_count} agent key(s), then dedicated key)"
+        )
+    } else {
+        anyhow::bail!("authentication failed via dedicated key (ssh-agent not available)")
+    }
+}
+
+enum AgentAuthOutcome {
+    Success,
+    Rejected { tried: usize },
+}
+
+async fn try_agent_auth(
+    handle: &mut Handle<Client>,
+    user: &str,
+    hash: Option<HashAlg>,
+) -> Result<AgentAuthOutcome> {
+    let mut agent = keys::agent::client::AgentClient::connect_env()
+        .await
+        .context("no ssh-agent available (SSH_AUTH_SOCK unset or socket unreachable)")?;
+
+    let identities = agent
+        .request_identities()
+        .await
+        .context("ssh-agent request_identities failed")?;
+
+    if identities.is_empty() {
+        tracing::debug!("ssh-agent reachable but no identities loaded");
+        return Ok(AgentAuthOutcome::Rejected { tried: 0 });
+    }
+    tracing::debug!(count = identities.len(), "ssh-agent offered identities");
+
+    let total = identities.len();
+    for pubkey in identities {
+        let fingerprint = pubkey.fingerprint(Default::default()).to_string();
+        match handle
+            .authenticate_publickey_with(user.to_string(), pubkey, hash, &mut agent)
+            .await
+        {
+            Ok(r) if r.success() => {
+                tracing::info!(%fingerprint, "authenticated via ssh-agent");
+                return Ok(AgentAuthOutcome::Success);
+            }
+            Ok(_) => {
+                tracing::debug!(%fingerprint, "agent key rejected by server, trying next");
+            }
+            Err(err) => {
+                tracing::debug!(
+                    %fingerprint,
+                    error = ?err,
+                    "agent auth attempt failed, trying next"
+                );
+            }
+        }
+    }
+    Ok(AgentAuthOutcome::Rejected { tried: total })
 }
 
 /// Listen for SIGWINCH and forward window size changes via the command channel.
@@ -312,5 +386,12 @@ mod tests {
         let mixed = vec![v4(1, 2, 3, 4, 22), v6(22)];
         let all = filter_addrs(mixed.clone(), AddressFamily::Auto);
         assert_eq!(all.len(), mixed.len());
+    }
+
+    #[test]
+    fn smoke_agent_client_connect_env_reads_env_var() {
+        // Just ensures the ssh-agent symbol is importable/linkable.
+        // Actual agent connection is env-dependent and not tested here.
+        let _ = russh::keys::agent::client::AgentClient::connect_env;
     }
 }

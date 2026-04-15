@@ -62,7 +62,6 @@ async fn run() -> Result<ExitCode> {
     logging::init(&verbosity)?;
     tracing::debug!(?config, "resolved cli config");
 
-    let identity_path = identity::ensure()?;
     let _raw_mode = RawModeGuard::enable_if_tty();
 
     tracing::info!("starting audio runtime");
@@ -76,7 +75,7 @@ async fn run() -> Result<ExitCode> {
 
     tracing::info!("starting ssh session");
     let (token_tx, token_rx) = oneshot::channel();
-    let mut ssh_session = ssh::connect(&config, &identity_path, token_tx).await?;
+    let mut ssh_session = ssh::connect(&config, token_tx).await?;
 
     // Wait for the token OR an early exit from the output task / exit channel.
     let token = {
