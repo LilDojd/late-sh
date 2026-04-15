@@ -1,4 +1,5 @@
 mod cli;
+mod identity;
 mod legacy;
 mod logging;
 
