@@ -12,12 +12,12 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use std::io::IsTerminal;
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::oneshot;
 
 use crate::audio::AudioRuntime;
 use crate::pair::PairShared;
+use crate::ssh::io::flush_stdin_input_queue;
 use crate::supervisor::Outcome;
 
 struct RawModeGuard(bool);
@@ -106,12 +106,12 @@ async fn run() -> Result<ExitCode> {
     };
 
     // Pre-handshake keystrokes were not being forwarded (stdin task wasn't
-    // running); any bytes the kernel buffered remain available for the TUI
-    // that's about to start. Spawning stdin now mirrors the legacy
-    // `input_gate` flip at the same point in the flow.
+    // running), but the kernel has been buffering them in the tty input queue
+    // the whole time. Flush that queue before starting the forwarder so that
+    // impatient keystrokes during the handshake race don't leak into the
+    // remote TUI as spurious input.
+    flush_stdin_input_queue();
     ssh_session.spawn_stdin();
-    let handshake_done = Arc::new(AtomicBool::new(true));
-    handshake_done.store(true, Ordering::Relaxed);
     tracing::info!("received session token and starting websocket pairing");
 
     let shared = PairShared {
@@ -124,7 +124,7 @@ async fn run() -> Result<ExitCode> {
     let api_base_url = config.api_base_url.clone();
     let pair_task = tokio::spawn(pair::run_loop(api_base_url, token, frames, shared));
 
-    let outcome = supervisor::run(audio, ssh_session, pair_task, handshake_done).await?;
+    let outcome = supervisor::run(audio, ssh_session, pair_task).await?;
 
     Ok(report(outcome))
 }

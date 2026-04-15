@@ -1,6 +1,4 @@
 use anyhow::Result;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::task::JoinHandle;
 
@@ -19,7 +17,6 @@ pub async fn run(
     audio: AudioRuntime,
     ssh_session: SshSession,
     pair_task: JoinHandle<Result<()>>,
-    handshake_done: Arc<AtomicBool>,
 ) -> Result<Outcome> {
     let SshSession {
         handle,
@@ -36,13 +33,10 @@ pub async fn run(
         biased;
         exit = &mut exit_rx => {
             let status = exit.unwrap_or(None);
-            classify_exit(status, handshake_done.load(Ordering::Relaxed), None)
+            classify_exit(status)
         }
         join = &mut output_task => {
             match join {
-                Ok(Ok(())) if !handshake_done.load(Ordering::Relaxed) => {
-                    Outcome::SshBeforeHandshake(None)
-                }
                 Ok(Ok(())) => Outcome::CleanExit,
                 Ok(Err(err)) => Outcome::PairLoopFailed(err.context("ssh stdout forwarding failed")),
                 Err(err) => Outcome::PairLoopFailed(anyhow::anyhow!("ssh stdout task join failed: {err}")),
@@ -64,24 +58,13 @@ pub async fn run(
     Ok(outcome)
 }
 
-pub fn classify_exit(
-    status: Option<u32>,
-    handshake_done: bool,
-    stdout_closed_cleanly: Option<bool>,
-) -> Outcome {
-    if !handshake_done {
-        return Outcome::SshBeforeHandshake(status);
-    }
-
-    let stdout_closed = stdout_closed_cleanly.unwrap_or(false);
+pub fn classify_exit(status: Option<u32>) -> Outcome {
     match status {
         Some(0) => Outcome::CleanExit,
-        // russh delivers a `u32` exit status; 255 with a cleanly closed stdout
-        // mirrors the legacy OpenSSH "connection closed" signalling we
-        // previously treated as benign.
-        Some(255) if stdout_closed => Outcome::CleanExit,
-        None if stdout_closed => Outcome::CleanExit,
-        _ => Outcome::SshAfterHandshake(status),
+        // russh closes the channel without an ExitStatus when the remote
+        // disconnects cleanly — treat that as a clean exit.
+        None => Outcome::CleanExit,
+        Some(_) => Outcome::SshAfterHandshake(status),
     }
 }
 
@@ -114,6 +97,9 @@ async fn teardown(
     let _ = cmd_tx.send(ssh::ChannelCmd::Close).await;
     ssh::disconnect(handle).await;
 
+    // Abort the output task before awaiting so that dropping the JoinHandle on
+    // timeout doesn't just detach it — we actually want it cancelled.
+    output_task.abort();
     let _ = tokio::time::timeout(Duration::from_secs(2), output_task).await;
 }
 
@@ -122,50 +108,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn exit_before_handshake_is_before_handshake() {
-        let o = classify_exit(Some(1), false, None);
-        assert!(matches!(o, Outcome::SshBeforeHandshake(Some(1))));
-    }
-
-    #[test]
-    fn none_exit_before_handshake_is_before_handshake() {
-        let o = classify_exit(None, false, None);
-        assert!(matches!(o, Outcome::SshBeforeHandshake(None)));
-    }
-
-    #[test]
     fn success_after_handshake_is_clean() {
-        let o = classify_exit(Some(0), true, None);
+        let o = classify_exit(Some(0));
         assert!(matches!(o, Outcome::CleanExit));
     }
 
     #[test]
-    fn code_255_after_handshake_with_clean_stdout_is_clean() {
-        let o = classify_exit(Some(255), true, Some(true));
-        assert!(matches!(o, Outcome::CleanExit));
-    }
-
-    #[test]
-    fn code_255_after_handshake_without_clean_stdout_is_after_handshake() {
-        let o = classify_exit(Some(255), true, Some(false));
-        assert!(matches!(o, Outcome::SshAfterHandshake(Some(255))));
-    }
-
-    #[test]
-    fn nonzero_after_handshake_is_after_handshake() {
-        let o = classify_exit(Some(42), true, None);
+    fn nonzero_is_after_handshake() {
+        let o = classify_exit(Some(42));
         assert!(matches!(o, Outcome::SshAfterHandshake(Some(42))));
     }
 
     #[test]
-    fn missing_status_after_handshake_with_clean_stdout_is_clean() {
-        let o = classify_exit(None, true, Some(true));
+    fn none_status_is_clean() {
+        let o = classify_exit(None);
         assert!(matches!(o, Outcome::CleanExit));
-    }
-
-    #[test]
-    fn missing_status_after_handshake_without_clean_stdout_is_after_handshake() {
-        let o = classify_exit(None, true, None);
-        assert!(matches!(o, Outcome::SshAfterHandshake(None)));
     }
 }

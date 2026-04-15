@@ -43,8 +43,9 @@ pub async fn forward_output(
                         }
                     }
                     ChannelMsg::ExtendedData { ref data, .. } => {
-                        stdout.write_all(data.as_ref()).await?;
-                        stdout.flush().await?;
+                        let mut stderr = tokio::io::stderr();
+                        stderr.write_all(data.as_ref()).await?;
+                        stderr.flush().await?;
                     }
                     ChannelMsg::ExitStatus { exit_status } => {
                         if let Some(tx) = exit_tx.take() {
@@ -85,6 +86,24 @@ pub async fn forward_output(
         let _ = tx.send(None);
     }
     Ok(())
+}
+
+/// Flush any bytes the kernel has buffered on stdin. Called right before the
+/// stdin forwarder starts so that keystrokes mashed during the pre-handshake
+/// race do not leak into the remote TUI as spurious input.
+pub fn flush_stdin_input_queue() {
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() {
+        return;
+    }
+    // SAFETY: tcflush is safe to call on a file descriptor we own (STDIN).
+    let rc = unsafe { libc::tcflush(libc::STDIN_FILENO, libc::TCIFLUSH) };
+    if rc == -1 {
+        tracing::debug!(
+            error = ?std::io::Error::last_os_error(),
+            "failed to flush pending stdin before enabling ssh input"
+        );
+    }
 }
 
 /// Stdin forwarding task. Reads the local tty into 4KiB chunks and relays them

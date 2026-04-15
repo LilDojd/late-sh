@@ -25,6 +25,7 @@ crossterm = "0.29"
 dirs = "5"
 url = "2"
 futures-util = "0.3"
+libc = "0.2"
 reqwest = { workspace = true, features = ["blocking"] }
 russh = "0.56"
 rustfft = "6.4.1"

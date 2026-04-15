@@ -2627,6 +2627,7 @@ dependencies = [
  "crossterm",
  "dirs",
  "futures-util",
+ "libc",
  "reqwest 0.13.1",
  "russh",
  "rustfft",
