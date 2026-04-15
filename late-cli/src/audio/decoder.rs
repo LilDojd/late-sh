@@ -83,7 +83,10 @@ impl StreamDecoder {
             let decoder = get_codecs().make(&track.codec_params, &DecoderOptions::default())?;
             (
                 track.id,
-                AudioSpec { sample_rate, channels },
+                AudioSpec {
+                    sample_rate,
+                    channels,
+                },
                 decoder,
             )
         };
@@ -309,8 +312,14 @@ mod tests {
 
     #[test]
     fn trim_stream_suffix_normalizes_base_url() {
-        assert_eq!(trim_stream_suffix("http://audio.late.sh/stream"), "http://audio.late.sh");
-        assert_eq!(trim_stream_suffix("http://audio.late.sh/"), "http://audio.late.sh");
+        assert_eq!(
+            trim_stream_suffix("http://audio.late.sh/stream"),
+            "http://audio.late.sh"
+        );
+        assert_eq!(
+            trim_stream_suffix("http://audio.late.sh/"),
+            "http://audio.late.sh"
+        );
     }
 
     #[test]

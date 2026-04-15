@@ -11,13 +11,16 @@ use std::fs;
 use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::process::Stdio;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use tokio::process::{Child, Command};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
-use pty::{nix_to_io_error, pty_winsize, terminal_size_or_default, PtyResizeHandle, TIOCSCTTY_IOCTL_REQUEST};
+use pty::{
+    PtyResizeHandle, TIOCSCTTY_IOCTL_REQUEST, nix_to_io_error, pty_winsize,
+    terminal_size_or_default,
+};
 
 pub const CLI_MODE_ENV: &str = "LATE_CLI_MODE";
 
@@ -41,7 +44,10 @@ pub async fn spawn(
     let slave = fs::File::from(pty_pair.slave);
     let slave_fd = slave.as_raw_fd();
 
-    let (program, extra_args) = cfg.ssh_bin.split_first().context("ssh client command is empty")?;
+    let (program, extra_args) = cfg
+        .ssh_bin
+        .split_first()
+        .context("ssh client command is empty")?;
     let mut cmd = Command::new(program);
     cmd.env(CLI_MODE_ENV, "1")
         .args(extra_args)
@@ -54,9 +60,19 @@ pub async fn spawn(
         .arg("-o")
         .arg(format!("SendEnv={CLI_MODE_ENV}"))
         .arg(&cfg.ssh_target)
-        .stdin(Stdio::from(slave.try_clone().context("clone ssh pty slave for stdin")?))
-        .stdout(Stdio::from(slave.try_clone().context("clone ssh pty slave for stdout")?))
-        .stderr(Stdio::from(slave.try_clone().context("clone ssh pty slave for stderr")?))
+        .stdin(Stdio::from(
+            slave.try_clone().context("clone ssh pty slave for stdin")?,
+        ))
+        .stdout(Stdio::from(
+            slave
+                .try_clone()
+                .context("clone ssh pty slave for stdout")?,
+        ))
+        .stderr(Stdio::from(
+            slave
+                .try_clone()
+                .context("clone ssh pty slave for stderr")?,
+        ))
         .kill_on_drop(true);
 
     unsafe {
@@ -72,13 +88,16 @@ pub async fn spawn(
     let child = cmd.spawn().context("failed to start ssh session")?;
     drop(slave);
 
-    let output_pty = master.try_clone().context("clone ssh pty master for output")?;
-    let input_pty = master.try_clone().context("clone ssh pty master for input")?;
+    let output_pty = master
+        .try_clone()
+        .context("clone ssh pty master for output")?;
+    let input_pty = master
+        .try_clone()
+        .context("clone ssh pty master for input")?;
     let input_gate = Arc::new(AtomicBool::new(false));
     let input_gate_for_task = Arc::clone(&input_gate);
 
-    let output_task =
-        tokio::task::spawn_blocking(move || io::forward_output(output_pty, token_tx));
+    let output_task = tokio::task::spawn_blocking(move || io::forward_output(output_pty, token_tx));
     let input_task =
         tokio::task::spawn_blocking(move || io::forward_stdin(input_pty, input_gate_for_task));
 

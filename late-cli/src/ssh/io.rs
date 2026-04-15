@@ -3,8 +3,8 @@ use anyhow::Result;
 use nix::libc;
 use std::fs;
 use std::io::{self, IsTerminal, Read, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::oneshot;
 
 pub fn forward_output(mut pty: fs::File, token_tx: oneshot::Sender<String>) -> Result<()> {

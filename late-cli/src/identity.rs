@@ -53,10 +53,7 @@ fn prompt_generate(path: &Path) -> Result<()> {
 }
 
 pub fn is_affirmative(input: &str) -> bool {
-    matches!(
-        input.trim().to_ascii_lowercase().as_str(),
-        "y" | "yes"
-    )
+    matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
 fn generate(path: &Path) -> Result<()> {

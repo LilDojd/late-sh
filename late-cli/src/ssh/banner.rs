@@ -28,7 +28,10 @@ impl Default for BannerParser {
 
 impl BannerParser {
     pub fn new() -> Self {
-        Self { state: State::Scanning, buf: Vec::new() }
+        Self {
+            state: State::Scanning,
+            buf: Vec::new(),
+        }
     }
 
     pub fn feed(&mut self, bytes: &[u8]) -> Vec<Event> {
@@ -122,7 +125,9 @@ mod tests {
         let evts = p.feed(b"LATE_SESSION_TOKEN=second\r\n");
         assert_eq!(
             evts,
-            vec![Event::Passthrough(b"LATE_SESSION_TOKEN=second\r\n".to_vec())]
+            vec![Event::Passthrough(
+                b"LATE_SESSION_TOKEN=second\r\n".to_vec()
+            )]
         );
     }
 }

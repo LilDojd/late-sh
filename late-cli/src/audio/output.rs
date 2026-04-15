@@ -2,7 +2,7 @@ use super::decoder::AudioSpec;
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait};
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 pub type PlaybackQueue = Arc<Mutex<VecDeque<f32>>>;
@@ -88,7 +88,10 @@ pub fn build_output_stream(
         other => anyhow::bail!("unsupported sample format: {other:?}"),
     };
 
-    Ok(BuiltOutputStream { stream, sample_rate })
+    Ok(BuiltOutputStream {
+        stream,
+        sample_rate,
+    })
 }
 
 pub fn output_sample_rate_for(spec: AudioSpec) -> Result<u32> {
@@ -182,7 +185,12 @@ pub fn output_config_rank(
         _ => 6,
     };
 
-    (channel_rank, sample_rate.abs_diff(spec.sample_rate), format_rank, channels)
+    (
+        channel_rank,
+        sample_rate.abs_diff(spec.sample_rate),
+        format_rank,
+        channels,
+    )
 }
 
 pub fn choose_output_config(
@@ -255,7 +263,10 @@ mod tests {
 
     #[test]
     fn maps_stereo_to_quad_by_repeating_lr_pairs() {
-        assert_eq!(map_output_frame(&[0.25, -0.5], 4), vec![0.25, -0.5, 0.25, -0.5]);
+        assert_eq!(
+            map_output_frame(&[0.25, -0.5], 4),
+            vec![0.25, -0.5, 0.25, -0.5]
+        );
     }
 
     #[test]

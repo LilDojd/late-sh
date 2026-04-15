@@ -9,16 +9,16 @@ use anyhow::{Context, Result};
 use cpal::traits::StreamTrait;
 use std::collections::VecDeque;
 use std::env;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 use tokio::sync::broadcast;
 use url::Url;
 
 use analyzer as analyzer_mod;
-use decoder::{trim_stream_suffix, StreamDecoder, StreamingLinearResampler};
-use output::{build_output_stream, output_sample_rate_for, BuiltOutputStream};
+use decoder::{StreamDecoder, StreamingLinearResampler, trim_stream_suffix};
+use output::{BuiltOutputStream, build_output_stream, output_sample_rate_for};
 
 pub struct AudioRuntime {
     _stream: cpal::Stream,
@@ -49,7 +49,10 @@ impl AudioRuntime {
         let (analyzer_tx, _) = broadcast::channel(32);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
 
-        let BuiltOutputStream { stream, sample_rate } = build_output_stream(
+        let BuiltOutputStream {
+            stream,
+            sample_rate,
+        } = build_output_stream(
             source_spec,
             Arc::clone(&queue),
             Arc::clone(&played_ring),
@@ -77,7 +80,9 @@ impl AudioRuntime {
         ready_rx
             .recv()
             .context("failed to receive decoder startup status")??;
-        stream.play().context("failed to start audio output stream")?;
+        stream
+            .play()
+            .context("failed to start audio output stream")?;
 
         Ok(Self {
             _stream: stream,
@@ -117,7 +122,16 @@ fn spawn_decoder_thread(
 ) {
     thread::Builder::new()
         .name("late-decoder".into())
-        .spawn(move || decoder_loop(audio_base_url, queue, source_spec, output_sample_rate, stop, ready_tx))
+        .spawn(move || {
+            decoder_loop(
+                audio_base_url,
+                queue,
+                source_spec,
+                output_sample_rate,
+                stop,
+                ready_tx,
+            )
+        })
         .expect("spawn late-decoder thread");
 }
 
@@ -129,17 +143,16 @@ fn decoder_loop(
     stop: Arc<AtomicBool>,
     ready_tx: mpsc::SyncSender<Result<()>>,
 ) {
-    let mut decoder_opt =
-        match StreamDecoder::new_http(&trim_stream_suffix(&audio_base_url)) {
-            Ok(decoder) => {
-                let _ = ready_tx.send(Ok(()));
-                Some(decoder)
-            }
-            Err(err) => {
-                let _ = ready_tx.send(Err(err.context("failed to create audio decoder")));
-                return;
-            }
-        };
+    let mut decoder_opt = match StreamDecoder::new_http(&trim_stream_suffix(&audio_base_url)) {
+        Ok(decoder) => {
+            let _ = ready_tx.send(Ok(()));
+            Some(decoder)
+        }
+        Err(err) => {
+            let _ = ready_tx.send(Err(err.context("failed to create audio decoder")));
+            return;
+        }
+    };
 
     let max_buffer_samples = output_sample_rate as usize * source_spec.channels * 2;
     let mut chunk = Vec::with_capacity(1024 * source_spec.channels);
@@ -176,7 +189,10 @@ fn decoder_loop(
                     );
                     break;
                 }
-                tracing::warn!(attempt = retries, "audio stream ended or errored, reconnecting in 2s...");
+                tracing::warn!(
+                    attempt = retries,
+                    "audio stream ended or errored, reconnecting in 2s..."
+                );
                 thread::sleep(Duration::from_secs(2));
 
                 match StreamDecoder::new_http(&trim_stream_suffix(&audio_base_url)) {

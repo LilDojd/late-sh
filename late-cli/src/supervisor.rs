@@ -1,20 +1,21 @@
 use anyhow::Result;
 use std::process::ExitStatus;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::process::Child;
 use tokio::task::JoinHandle;
 
 use crate::audio::AudioRuntime;
-use crate::ssh::pty::PtyResizeHandle;
 use crate::ssh::SshProcess;
+use crate::ssh::pty::PtyResizeHandle;
 
 #[derive(Debug)]
 pub enum Outcome {
     CleanExit,
     SshBeforeHandshake(ExitStatus),
     SshAfterHandshake(ExitStatus),
+    #[allow(dead_code)]
     AudioFailed(anyhow::Error),
     PairLoopFailed(anyhow::Error),
 }
@@ -95,7 +96,11 @@ async fn poll_output_task(
     }
 }
 
-pub fn classify_exit(status: ExitStatus, handshake_done: bool, stdout_closed_cleanly: Option<bool>) -> Outcome {
+pub fn classify_exit(
+    status: ExitStatus,
+    handshake_done: bool,
+    stdout_closed_cleanly: Option<bool>,
+) -> Outcome {
     if !handshake_done {
         return Outcome::SshBeforeHandshake(status);
     }
@@ -120,9 +125,7 @@ fn handle_output_end(
     }
 }
 
-fn handle_pair_end(
-    result: std::result::Result<Result<()>, tokio::task::JoinError>,
-) -> Outcome {
+fn handle_pair_end(result: std::result::Result<Result<()>, tokio::task::JoinError>) -> Outcome {
     match result {
         Ok(Ok(())) => Outcome::CleanExit,
         Ok(Err(err)) => Outcome::PairLoopFailed(err),

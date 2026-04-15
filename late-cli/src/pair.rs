@@ -2,8 +2,8 @@ use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::json;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::time::interval;
@@ -132,7 +132,11 @@ async fn send_client_state(
     Ok(())
 }
 
-pub fn apply_pair_control(text: &str, muted: &AtomicBool, volume_percent: &AtomicU8) -> Result<bool> {
+pub fn apply_pair_control(
+    text: &str,
+    muted: &AtomicBool,
+    volume_percent: &AtomicU8,
+) -> Result<bool> {
     match serde_json::from_str::<PairControlMessage>(text)? {
         PairControlMessage::ToggleMute => {
             let now_muted = muted.fetch_xor(true, Ordering::Relaxed) ^ true;
@@ -166,8 +170,12 @@ pub fn playback_position_ms(played_samples: &AtomicU64, sample_rate: u32) -> u64
 pub fn pair_ws_url(api_base_url: &Url, token: &str) -> Result<Url> {
     let mut url = api_base_url.clone();
     match url.scheme() {
-        "https" => url.set_scheme("wss").map_err(|_| anyhow::anyhow!("failed to set wss scheme"))?,
-        "http" => url.set_scheme("ws").map_err(|_| anyhow::anyhow!("failed to set ws scheme"))?,
+        "https" => url
+            .set_scheme("wss")
+            .map_err(|_| anyhow::anyhow!("failed to set wss scheme"))?,
+        "http" => url
+            .set_scheme("ws")
+            .map_err(|_| anyhow::anyhow!("failed to set ws scheme"))?,
         "ws" | "wss" => {}
         other => anyhow::bail!("api base url has unsupported scheme '{other}'"),
     }

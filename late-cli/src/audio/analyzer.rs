@@ -1,7 +1,7 @@
 use super::output::PlayedRing;
 use rustfft::{Fft, FftPlanner, num_complex::Complex};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 use tokio::sync::broadcast;
@@ -65,7 +65,10 @@ fn run(
                 let samples: Vec<f32> = played_ring.iter().skip(start).copied().collect();
                 let (mut bands_out, mut rms) = analyze_frame(&samples, &*fft, &mut scratch, &bands);
                 normalize_bands(&mut bands_out, &mut rms, cfg.gain);
-                Some(VizSample { bands: bands_out, rms })
+                Some(VizSample {
+                    bands: bands_out,
+                    rms,
+                })
             }
         };
 
