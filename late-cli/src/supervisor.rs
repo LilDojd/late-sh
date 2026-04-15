@@ -15,8 +15,6 @@ pub enum Outcome {
     CleanExit,
     SshBeforeHandshake(ExitStatus),
     SshAfterHandshake(ExitStatus),
-    #[allow(dead_code)]
-    AudioFailed(anyhow::Error),
     PairLoopFailed(anyhow::Error),
 }
 

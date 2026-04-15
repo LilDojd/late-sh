@@ -127,10 +127,6 @@ fn report(outcome: Outcome) -> ExitCode {
             eprintln!("error: ssh session ended with status {status}");
             ExitCode::from(1)
         }
-        Outcome::AudioFailed(err) => {
-            eprintln!("error: audio stopped: {err:#}");
-            ExitCode::from(3)
-        }
         Outcome::PairLoopFailed(err) => {
             eprintln!("error: visualizer pairing failed: {err:#}");
             ExitCode::from(4)
