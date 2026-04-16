@@ -697,7 +697,7 @@ resource "kubernetes_deployment_v1" "grafana" {
       spec {
         container {
           name  = "grafana"
-          image = "grafana/grafana-enterprise:12.4.0"
+          image = "grafana/grafana-enterprise:12.4.3"
 
           env {
             name = "GF_SECURITY_ADMIN_USER"
