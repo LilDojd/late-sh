@@ -410,7 +410,7 @@ late-sh/
 │   ├── assets/nonograms/       # Prebuilt puzzle packs
 │   └── tests/                  # Integration/smoke tests grouped by feature
 ├── late-cli/
-│   └── src/main.rs             # Standalone CLI: audio + analyzer + SSH + WS pairing
+│   └── src/                    # Standalone CLI: main + config, identity, raw_mode, pty, ssh, ws, audio/{decoder,resampler,output,decoder_thread,analyzer}
 ├── late-web/
 │   ├── src/
 │   │   ├── main.rs / lib.rs    # Web entrypoint + router
