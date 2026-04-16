@@ -13,6 +13,13 @@ updates:
     open-pull-requests-limit: 10
     commit-message:
       prefix: "cargo:"
+    ignore:
+      # Crossterm has been known to break semver
+      # https://github.com/Nukesor/comfy-table/issues/109
+      - dependency-name: "crossterm"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
     groups:
       # Group all Cargo dependency updates into a single PR
       cargo-dependencies:
