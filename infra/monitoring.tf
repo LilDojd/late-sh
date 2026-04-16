@@ -2,7 +2,7 @@ resource "helm_release" "local_path_provisioner" {
   name             = "local-path-provisioner"
   repository       = "https://containeroo.github.io/helm-charts/"
   chart            = "local-path-provisioner"
-  version          = "0.0.33"
+  version          = "0.0.36"
   namespace        = "local-path-storage"
   create_namespace = true
 
