@@ -98,6 +98,9 @@
           # Integration / infra tooling (docker-compose stack, migrations, etc.)
           postgresql
           docker-compose
+
+          zizmor
+          actionlint
         ];
 
         # on macOS and Linux, use faster parallel linkers that are much more
