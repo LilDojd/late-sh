@@ -18,16 +18,12 @@ impl StreamingLinearResampler {
     }
 
     pub(super) fn process(&mut self, input: &[f32]) -> Vec<f32> {
-        if self.channels == 0
-            || input.is_empty()
-            || !input.len().is_multiple_of(self.channels)
-        {
+        if self.channels == 0 || input.is_empty() || !input.len().is_multiple_of(self.channels) {
             return Vec::new();
         }
 
         if self.source_rate == self.target_rate {
-            self.previous_frame =
-                Some(input[input.len() - self.channels..input.len()].to_vec());
+            self.previous_frame = Some(input[input.len() - self.channels..input.len()].to_vec());
             return input.to_vec();
         }
 
@@ -55,8 +51,7 @@ impl StreamingLinearResampler {
         }
 
         self.position -= available_intervals;
-        self.previous_frame =
-            Some(input[input.len() - self.channels..input.len()].to_vec());
+        self.previous_frame = Some(input[input.len() - self.channels..input.len()].to_vec());
         output
     }
 

@@ -20,25 +20,20 @@ impl Config {
     pub(super) fn from_args(args: impl IntoIterator<Item = String>) -> Result<Self> {
         let mut ssh_target =
             env::var("LATE_SSH_TARGET").unwrap_or_else(|_| DEFAULT_SSH_TARGET.to_string());
-        let mut ssh_bin = parse_ssh_bin_spec(
-            &env::var("LATE_SSH_BIN").unwrap_or_else(|_| "ssh".to_string()),
-        )?;
-        let mut audio_base_url = env::var("LATE_AUDIO_BASE_URL")
-            .unwrap_or_else(|_| DEFAULT_AUDIO_BASE_URL.to_string());
-        let mut api_base_url = env::var("LATE_API_BASE_URL")
-            .unwrap_or_else(|_| DEFAULT_API_BASE_URL.to_string());
+        let mut ssh_bin =
+            parse_ssh_bin_spec(&env::var("LATE_SSH_BIN").unwrap_or_else(|_| "ssh".to_string()))?;
+        let mut audio_base_url =
+            env::var("LATE_AUDIO_BASE_URL").unwrap_or_else(|_| DEFAULT_AUDIO_BASE_URL.to_string());
+        let mut api_base_url =
+            env::var("LATE_API_BASE_URL").unwrap_or_else(|_| DEFAULT_API_BASE_URL.to_string());
         let mut verbose = false;
 
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--ssh-target" => ssh_target = next_value(&mut args, "--ssh-target")?,
-                "--ssh-bin" => {
-                    ssh_bin = parse_ssh_bin_spec(&next_value(&mut args, "--ssh-bin")?)?
-                }
-                "--audio-base-url" => {
-                    audio_base_url = next_value(&mut args, "--audio-base-url")?
-                }
+                "--ssh-bin" => ssh_bin = parse_ssh_bin_spec(&next_value(&mut args, "--ssh-bin")?)?,
+                "--audio-base-url" => audio_base_url = next_value(&mut args, "--audio-base-url")?,
                 "--api-base-url" => api_base_url = next_value(&mut args, "--api-base-url")?,
                 "--verbose" | "-v" => verbose = true,
                 "--help" | "-h" => {

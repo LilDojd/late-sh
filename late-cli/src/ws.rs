@@ -100,11 +100,7 @@ async fn send_client_state(
     Ok(())
 }
 
-fn apply_pair_control(
-    text: &str,
-    muted: &AtomicBool,
-    volume_percent: &AtomicU8,
-) -> Result<bool> {
+fn apply_pair_control(text: &str, muted: &AtomicBool, volume_percent: &AtomicU8) -> Result<bool> {
     match serde_json::from_str::<PairControlMessage>(text)? {
         PairControlMessage::ToggleMute => {
             let now_muted = muted.fetch_xor(true, Ordering::Relaxed) ^ true;

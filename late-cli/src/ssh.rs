@@ -121,8 +121,7 @@ pub(super) async fn spawn_ssh(
     let input_gate = Arc::new(AtomicBool::new(false));
     let input_gate_for_task = Arc::clone(&input_gate);
 
-    let output_task =
-        tokio::task::spawn_blocking(move || forward_ssh_output(output_pty, token_tx));
+    let output_task = tokio::task::spawn_blocking(move || forward_ssh_output(output_pty, token_tx));
     let input_task =
         tokio::task::spawn_blocking(move || forward_stdin(input_pty, input_gate_for_task));
 

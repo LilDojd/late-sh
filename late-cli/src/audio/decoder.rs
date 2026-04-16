@@ -76,8 +76,7 @@ impl SymphoniaStreamDecoder {
                 .channels
                 .context("no channel layout")?
                 .count();
-            let decoder =
-                get_codecs().make(&track.codec_params, &DecoderOptions::default())?;
+            let decoder = get_codecs().make(&track.codec_params, &DecoderOptions::default())?;
             (
                 track.id,
                 AudioSpec {

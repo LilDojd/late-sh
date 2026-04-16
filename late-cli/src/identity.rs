@@ -63,8 +63,7 @@ fn generate_identity(path: &Path) -> Result<()> {
     let parent = path
         .parent()
         .context("generated identity path has no parent directory")?;
-    fs::create_dir_all(parent)
-        .with_context(|| format!("failed to create {}", parent.display()))?;
+    fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
 
     #[cfg(unix)]
     {

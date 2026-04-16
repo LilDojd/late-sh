@@ -31,8 +31,7 @@ pub(super) fn spawn_playback_analyzer_thread(
                     None
                 } else {
                     let start = played_ring.len() - cfg.fft_size;
-                    let samples: Vec<f32> =
-                        played_ring.iter().skip(start).copied().collect();
+                    let samples: Vec<f32> = played_ring.iter().skip(start).copied().collect();
                     let (mut bands_out, mut rms) =
                         analyze_frame(&samples, &*fft, &mut scratch, &bands);
                     normalize_bands(&mut bands_out, &mut rms, cfg.gain);
@@ -82,8 +81,7 @@ fn analyze_frame(
 ) -> ([f32; 8], f32) {
     let n = samples.len();
     for (i, s) in samples.iter().enumerate() {
-        let w =
-            0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / (n as f32 - 1.0)).cos();
+        let w = 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / (n as f32 - 1.0)).cos();
         scratch[i] = Complex::new(s * w, 0.0);
     }
 

@@ -10,8 +10,7 @@ use std::{
 };
 
 use super::{
-    AudioSpec, PlaybackQueue, StreamingLinearResampler, SymphoniaStreamDecoder,
-    trim_stream_suffix,
+    AudioSpec, PlaybackQueue, StreamingLinearResampler, SymphoniaStreamDecoder, trim_stream_suffix,
 };
 
 pub(super) fn spawn_decoder_thread(
@@ -30,8 +29,7 @@ pub(super) fn spawn_decoder_thread(
                     Some(decoder)
                 }
                 Err(err) => {
-                    let _ =
-                        ready_tx.send(Err(err.context("failed to create audio decoder")));
+                    let _ = ready_tx.send(Err(err.context("failed to create audio decoder")));
                     return;
                 }
             };
@@ -77,9 +75,7 @@ pub(super) fn spawn_decoder_thread(
                     );
                     thread::sleep(Duration::from_secs(2));
 
-                    match SymphoniaStreamDecoder::new_http(&trim_stream_suffix(
-                        &audio_base_url,
-                    )) {
+                    match SymphoniaStreamDecoder::new_http(&trim_stream_suffix(&audio_base_url)) {
                         Ok(new_decoder) => {
                             tracing::info!("audio stream reconnected");
                             decoder_opt = Some(new_decoder);
