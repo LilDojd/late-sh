@@ -1,0 +1,87 @@
+# Basic `dependabot.yml` file for late-sh-cli-ref
+# Covers: Cargo (Rust workspace), npm (late-web frontend), GitHub Actions, Docker, Nix ecosystems
+
+version: 2
+updates:
+  # Enable version updates for Cargo (Rust workspace)
+  - package-ecosystem: "cargo"
+    # Look for `Cargo.toml` and `Cargo.lock` in the root directory
+    directory: "/"
+    # Check for updates once a week
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "cargo:"
+    groups:
+      # Group all Cargo dependency updates into a single PR
+      cargo-dependencies:
+        patterns:
+          - "*"
+
+  # Enable version updates for npm (Tailwind CSS frontend tooling)
+  - package-ecosystem: "npm"
+    # Look for `package.json` and `package-lock.json` in `late-web/`
+    directory: "/late-web"
+    # Check for updates once a week
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "npm:"
+    groups:
+      # Group all npm dependency updates into a single PR
+      npm-dependencies:
+        patterns:
+          - "*"
+
+  # Enable version updates for GitHub Actions
+  - package-ecosystem: "github-actions"
+    # Dependabot scans `.github/workflows/` automatically when directory is "/"
+    directory: "/"
+    # Check for updates once a month
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "github:"
+    groups:
+      # Group all GitHub Actions updates into a single PR
+      github-dependencies:
+        patterns:
+          - "*"
+
+  # Enable version updates for Docker
+  # `Dockerfile` is in the root directory
+  - package-ecosystem: "docker"
+    # Look for `Dockerfile` in the root directory
+    directory: "/"
+    # Check for updates once a month
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "docker:"
+    groups:
+      # Group all Docker base image updates into a single PR
+      docker-dependencies:
+        patterns:
+          - "*"
+
+  # Enable version updates for Nix
+  # Monitors `flake.lock` for outdated flake inputs
+  # Note: version updates only — security updates not supported for Nix
+  - package-ecosystem: "nix"
+    # Look for `flake.lock` in the root directory
+    directory: "/"
+    # Check for updates once a week
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "nix:"
+    groups:
+      # Group all Nix flake input updates into a single PR
+      nix-dependencies:
+        patterns:
+          - "*"
