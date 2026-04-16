@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.4
+# syntax=docker/dockerfile:1.23
 #
 # Multi-stage Dockerfile for late.sh services using cargo-chef
 # Optimized for fast rebuilds via Docker layer caching

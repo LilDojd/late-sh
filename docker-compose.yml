@@ -73,7 +73,7 @@ services:
       - ./infra/icecast/icecast.xml:/etc/icecast2/icecast.xml:ro
 
   liquidsoap:
-    image: savonet/liquidsoap:v2.4.0
+    image: savonet/liquidsoap:v2.4.3
     container_name: late-liquidsoap
     depends_on:
       - icecast

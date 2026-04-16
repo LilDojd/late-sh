@@ -16,7 +16,7 @@ services:
 
   otel-collector:
     container_name: late-otel-collector
-    image: otel/opentelemetry-collector-contrib:0.147.0
+    image: otel/opentelemetry-collector-contrib:0.150.1
     command:
       - --config=/etc/otelcol-contrib/config.yaml
     environment:
@@ -75,7 +75,7 @@ services:
 
   grafana:
     container_name: gofast-grafana
-    image: grafana/grafana-enterprise:12.4.0
+    image: grafana/grafana-enterprise:12.4.3
     ports:
       - 3001:3000
     volumes:
