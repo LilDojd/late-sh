@@ -766,11 +766,7 @@ impl russh::server::Handler for ClientHandler {
             }
 
             let init = App::enter_alt_screen();
-            let _ = timeout(
-                Duration::from_millis(50),
-                handle.data(channel_id, init),
-            )
-            .await;
+            let _ = timeout(Duration::from_millis(50), handle.data(channel_id, init)).await;
 
             let app = Arc::clone(app);
             let frame_drop_log_every = self.state.config.frame_drop_log_every;
@@ -892,12 +888,7 @@ async fn render_once(
         (frame, terminal_commands)
     };
 
-    match timeout(
-        Duration::from_millis(50),
-        handle.data(channel_id, frame),
-    )
-    .await
-    {
+    match timeout(Duration::from_millis(50), handle.data(channel_id, frame)).await {
         Ok(Ok(())) => {}
         Ok(Err(err)) => {
             return Err(anyhow::anyhow!(
@@ -915,12 +906,7 @@ async fn render_once(
     }
 
     for command in terminal_commands {
-        match timeout(
-            Duration::from_millis(50),
-            handle.data(channel_id, command),
-        )
-        .await
-        {
+        match timeout(Duration::from_millis(50), handle.data(channel_id, command)).await {
             Ok(Ok(())) => {}
             Ok(Err(err)) => {
                 return Err(anyhow::anyhow!(
@@ -943,11 +929,7 @@ async fn render_once(
 
 async fn clean_disconnect(handle: &russh::server::Handle, channel_id: ChannelId) {
     let exit = App::leave_alt_screen();
-    let _ = timeout(
-        Duration::from_millis(50),
-        handle.data(channel_id, exit),
-    )
-    .await;
+    let _ = timeout(Duration::from_millis(50), handle.data(channel_id, exit)).await;
     let _ = timeout(
         Duration::from_millis(50),
         handle.data(channel_id, EXIT_MESSAGE.as_bytes().to_vec()),
