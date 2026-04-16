@@ -86,7 +86,7 @@ resource "kubernetes_deployment_v1" "liquidsoap" {
       spec {
         container {
           name    = "liquidsoap"
-          image   = "savonet/liquidsoap:v2.4.0"
+          image   = "savonet/liquidsoap:v2.4.3"
           command = ["liquidsoap", "/etc/liquidsoap/radio.liq"]
 
           port {
