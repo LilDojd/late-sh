@@ -1,0 +1,14 @@
+[files]
+extend-exclude = [
+    "late-ssh/src/app/icon_picker/glyphnames.json",
+    "Cargo.lock",
+    "flake.lock",
+    "late-web/package-lock.json",
+]
+
+[default.extend-words]
+ratatui = "ratatui"
+OT = "OT"
+AFE = "AFE"
+Soop = "Soop"
+Classicals = "Classicals"

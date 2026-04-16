@@ -2,3 +2,4 @@
 rust = "latest"
 mold = "latest"
 "cargo:cargo-nextest" = "latest"
+"cargo:typos-cli" = "latest"
