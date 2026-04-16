@@ -75,7 +75,7 @@ services:
 
   grafana:
     container_name: gofast-grafana
-    image: grafana/grafana-enterprise:12.4.0
+    image: grafana/grafana-enterprise:13.0.0
     ports:
       - 3001:3000
     volumes:
