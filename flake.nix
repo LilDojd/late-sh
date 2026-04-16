@@ -89,6 +89,7 @@
           # Commonly useful cargo helpers
           cargo-llvm-cov
           cargo-watch
+          cargo-autoinherit
 
           # late-web frontend tooling
           nodejs
