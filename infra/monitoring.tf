@@ -582,7 +582,7 @@ resource "kubernetes_deployment_v1" "victoriametrics" {
       spec {
         container {
           name  = "victoriametrics"
-          image = "victoriametrics/victoria-metrics:v1.137.0"
+          image = "victoriametrics/victoria-metrics:v1.140.0"
           args = [
             "--storageDataPath=/storage",
             "--retentionPeriod=1"
