@@ -1,0 +1,22 @@
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "*": ref-pin
+  superfluous-actions:
+    ignore:
+      - ci.yml
+  secrets-inherit:
+    ignore:
+      - deploy.yml
+      - deploy_cli.yml
+      - deploy_web.yml
+      - deploy_infra.yml
+  artipacked:
+    ignore:
+      - terraform.yml
+      - deploy.yml
+      - deploy_cli.yml
+      - deploy_web.yml
+      - deploy_infra.yml
+      - build.yml
