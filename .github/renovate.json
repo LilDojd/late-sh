@@ -7,6 +7,10 @@
   "prHourlyLimit": 0,
   "prConcurrentLimit": 20,
   "rangeStrategy": "bump",
+  "labels": ["dependencies", "automated"],
+  "commitMessageAction": "update",
+  "commitMessageTopic": "{{groupName}}",
+  "commitMessageExtra": "",
   "nix": {
     "enabled": true
   },
@@ -17,8 +21,9 @@
   "packageRules": [
     {
       "matchManagers": ["cargo"],
-      "groupName": "cargo-dependencies",
+      "groupName": "cargo dependencies",
       "commitMessagePrefix": "cargo:",
+      "addLabels": ["cargo"],
       "schedule": ["before 6am on monday"]
     },
     {
@@ -31,26 +36,30 @@
     {
       "matchManagers": ["npm"],
       "matchFileNames": ["late-web/**"],
-      "groupName": "npm-dependencies",
+      "groupName": "npm dependencies",
       "commitMessagePrefix": "npm:",
+      "addLabels": ["npm"],
       "schedule": ["before 6am on monday"]
     },
     {
       "matchManagers": ["github-actions"],
-      "groupName": "github-dependencies",
+      "groupName": "github-actions dependencies",
       "commitMessagePrefix": "github:",
+      "addLabels": ["github-actions"],
       "schedule": ["before 6am on the first day of the month"]
     },
     {
       "matchManagers": ["dockerfile", "docker-compose"],
-      "groupName": "docker-dependencies",
+      "groupName": "docker dependencies",
       "commitMessagePrefix": "docker:",
+      "addLabels": ["docker"],
       "schedule": ["before 6am on the first day of the month"]
     },
     {
       "matchManagers": ["nix"],
-      "groupName": "nix-dependencies",
+      "groupName": "nix dependencies",
       "commitMessagePrefix": "nix:",
+      "addLabels": ["nix"],
       "schedule": ["before 6am on monday"]
     }
   ]
