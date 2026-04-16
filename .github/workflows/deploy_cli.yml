@@ -38,7 +38,7 @@ jobs:
             target: aarch64-apple-darwin
     steps:
       - name: checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: restore_rust_cache
         uses: Swatinem/rust-cache@v2
@@ -63,7 +63,7 @@ jobs:
           cp target/${{ matrix.target }}/release/late dist/${{ matrix.target }}/late
 
       - name: upload_cli_artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: late-${{ matrix.target }}
           path: dist/${{ matrix.target }}/late
@@ -85,7 +85,7 @@ jobs:
       IS_PRERELEASE: ${{ github.event.release.prerelease }}
     steps:
       - name: checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: download_cli_artifacts
         uses: actions/download-artifact@v8

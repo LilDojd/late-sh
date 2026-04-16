@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: install_rustfmt
         run: rustup component add rustfmt
       - name: cargo_fmt_check
@@ -44,7 +44,7 @@ jobs:
           --health-retries 5
     steps:
       - name: checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: install_linux_build_dependencies
         run: |
           sudo apt-get update
