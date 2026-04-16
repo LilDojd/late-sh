@@ -34,7 +34,7 @@ resource "helm_release" "barman_cloud_plugin" {
   name       = "barman-cloud"
   repository = "https://cloudnative-pg.github.io/charts"
   chart      = "plugin-barman-cloud"
-  version    = "0.4.0"
+  version    = "0.6.0"
   namespace  = "cnpg-system"
 
   depends_on = [helm_release.cloudnativepg, helm_release.cert_manager]
