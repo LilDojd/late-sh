@@ -195,7 +195,7 @@ resource "kubernetes_deployment_v1" "otel_collector" {
       spec {
         container {
           name  = "otel-collector"
-          image = "otel/opentelemetry-collector-contrib:0.147.0"
+          image = "otel/opentelemetry-collector-contrib:0.150.1"
           args  = ["--config=/etc/otelcol-contrib/config.yaml"]
 
           env {
