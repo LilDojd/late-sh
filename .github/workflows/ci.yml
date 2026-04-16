@@ -46,15 +46,16 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
-    needs: [fmt]
+    needs: [fmt, read_msrv]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ needs.read_msrv.outputs.msrv }}
           components: clippy
       - name: Install build dependencies
         run: |
