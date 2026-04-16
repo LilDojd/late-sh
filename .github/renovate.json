@@ -1,0 +1,57 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard"
+  ],
+  "prHourlyLimit": 0,
+  "prConcurrentLimit": 20,
+  "rangeStrategy": "bump",
+  "nix": {
+    "enabled": true
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on monday"]
+  },
+  "packageRules": [
+    {
+      "matchManagers": ["cargo"],
+      "groupName": "cargo-dependencies",
+      "commitMessagePrefix": "cargo:",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["crossterm"],
+      "matchUpdateTypes": ["major", "minor"],
+      "enabled": false,
+      "description": "crossterm breaks semver — https://github.com/Nukesor/comfy-table/issues/109"
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchFileNames": ["late-web/**"],
+      "groupName": "npm-dependencies",
+      "commitMessagePrefix": "npm:",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "github-dependencies",
+      "commitMessagePrefix": "github:",
+      "schedule": ["before 6am on the first day of the month"]
+    },
+    {
+      "matchManagers": ["dockerfile", "docker-compose"],
+      "groupName": "docker-dependencies",
+      "commitMessagePrefix": "docker:",
+      "schedule": ["before 6am on the first day of the month"]
+    },
+    {
+      "matchManagers": ["nix"],
+      "groupName": "nix-dependencies",
+      "commitMessagePrefix": "nix:",
+      "schedule": ["before 6am on monday"]
+    }
+  ]
+}
