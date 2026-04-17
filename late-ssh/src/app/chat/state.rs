@@ -1084,7 +1084,9 @@ impl ChatState {
         if !self.mention_ac.active || self.mention_ac.matches.is_empty() {
             return;
         }
-        let username = self.mention_ac.matches[self.mention_ac.selected].name.clone();
+        let username = self.mention_ac.matches[self.mention_ac.selected]
+            .name
+            .clone();
         self.composer.truncate(self.mention_ac.trigger_offset);
         self.composer.push('@');
         self.composer.push_str(&username);
@@ -1619,9 +1621,11 @@ pub(crate) fn rank_mention_matches(
         })
         .collect();
     matches.sort_by(|a, b| {
-        b.online
-            .cmp(&a.online)
-            .then_with(|| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()))
+        b.online.cmp(&a.online).then_with(|| {
+            a.name
+                .to_ascii_lowercase()
+                .cmp(&b.name.to_ascii_lowercase())
+        })
     });
     matches
 }
@@ -1752,11 +1756,7 @@ mod tests {
 
     #[test]
     fn rank_mention_matches_applies_prefix_filter() {
-        let all = vec![
-            "alice".to_string(),
-            "albert".to_string(),
-            "bob".to_string(),
-        ];
+        let all = vec!["alice".to_string(), "albert".to_string(), "bob".to_string()];
         let online: HashSet<String> = ["bob".to_string()].into_iter().collect();
         let ranked = rank_mention_matches(&all, "al", &online);
         assert_eq!(names(&ranked), vec!["albert", "alice"]);
