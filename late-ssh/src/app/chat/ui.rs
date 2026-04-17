@@ -555,14 +555,15 @@ fn draw_mention_autocomplete(
         .enumerate()
         .take(8)
         .map(|(i, m)| {
-            let style = if i == selected {
-                Style::default()
+            let is_selected = i == selected;
+            let style = match (is_selected, m.online) {
+                (true, _) => Style::default()
                     .fg(theme::AMBER())
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(theme::TEXT())
+                    .add_modifier(Modifier::BOLD),
+                (false, true) => Style::default().fg(theme::TEXT()),
+                (false, false) => Style::default().fg(theme::TEXT_FAINT()),
             };
-            let prefix = if i == selected { " > " } else { "   " };
+            let prefix = if is_selected { " > " } else { "   " };
             Line::from(Span::styled(format!("{prefix}@{}", m.name), style))
         })
         .collect();
