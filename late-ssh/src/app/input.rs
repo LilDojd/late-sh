@@ -51,6 +51,7 @@ enum ParsedInput {
     Byte(u8),
     Arrow(u8),
     CtrlArrow(u8),
+    Delete,
     CtrlBackspace,
     CtrlDelete,
     Scroll(isize),
@@ -228,6 +229,9 @@ impl Perform for VtCollector {
             }
             '~' if p0 == Some(3) && p1 == Some(5) => {
                 self.events.push(ParsedInput::CtrlDelete);
+            }
+            '~' if p0 == Some(3) => {
+                self.events.push(ParsedInput::Delete);
             }
             '~' if p0 == Some(8) && p1 == Some(5) => {
                 self.events.push(ParsedInput::CtrlBackspace);
@@ -530,6 +534,13 @@ fn handle_parsed_input(app: &mut App, event: ParsedInput) {
             }
             handle_scroll_for_screen(app, ctx.screen, isize::MIN)
         }
+        ParsedInput::Delete
+            if (ctx.screen == Screen::Chat || ctx.screen == Screen::Dashboard)
+                && ctx.chat_composing =>
+        {
+            app.chat.composer_delete_right();
+            app.chat.update_autocomplete();
+        }
         ParsedInput::CtrlBackspace
             if (ctx.screen == Screen::Chat || ctx.screen == Screen::Dashboard)
                 && ctx.chat_composing =>
@@ -565,7 +576,10 @@ fn handle_parsed_input(app: &mut App, event: ParsedInput) {
                 app.chat.composer_cursor_word_left();
             }
         }
-        ParsedInput::CtrlArrow(_) | ParsedInput::CtrlBackspace | ParsedInput::CtrlDelete => {}
+        ParsedInput::Delete
+        | ParsedInput::CtrlArrow(_)
+        | ParsedInput::CtrlBackspace
+        | ParsedInput::CtrlDelete => {}
         ParsedInput::Arrow(key) => {
             if ctx.screen == Screen::Chat && app.chat.room_jump_active {
                 let _ = chat::input::handle_arrow(app, key);
@@ -1264,6 +1278,7 @@ mod tests {
             vec![ParsedInput::CtrlArrow(b'C')]
         );
         assert_eq!(parser.feed(b"\x1b[5D"), vec![ParsedInput::CtrlArrow(b'D')]);
+        assert_eq!(parser.feed(b"\x1b[3~"), vec![ParsedInput::Delete]);
         assert_eq!(parser.feed(b"\x1b[3;5~"), vec![ParsedInput::CtrlDelete]);
         assert_eq!(
             parser.feed(b"\x1b[127;5u"),
