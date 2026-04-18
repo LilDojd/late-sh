@@ -598,14 +598,6 @@ fn route_char_to_composer(app: &mut App, ctx: InputContext, ch: char) -> bool {
         chat::input::handle_compose_char(app, ch);
         return true;
     }
-    if ctx.screen == Screen::Chat && ctx.news_composing {
-        chat::news::input::handle_composer_char(app, ch);
-        return true;
-    }
-    if ctx.screen == Screen::Profile && ctx.profile_composing {
-        profile::input::handle_composer_char(app, ch);
-        return true;
-    }
     false
 }
 

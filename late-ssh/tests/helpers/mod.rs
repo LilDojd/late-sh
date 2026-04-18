@@ -362,11 +362,7 @@ pub async fn chat_compose_app(name: &str) -> (TestDb, App) {
     app.handle_input(b"2");
     wait_for_render_contains(&mut app, " Rooms (h/l)").await;
     app.handle_input(b"i");
-    wait_for_render_contains(
-        &mut app,
-        "Compose (Enter send, Alt+Enter newline, Esc cancel)",
-    )
-    .await;
+    wait_for_render_contains(&mut app, "Compose (Enter send").await;
     (test_db, app)
 }
 

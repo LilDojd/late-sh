@@ -10,12 +10,11 @@ pub fn handle_composer_input(app: &mut App, byte: u8) {
             app.chat.news.composer_clear();
         }
         0x7F | 0x08 => app.chat.news.composer_pop(),
+        b if (32..127).contains(&b) => {
+            app.chat.news.composer_push(b as char);
+        }
         _ => {}
     }
-}
-
-pub fn handle_composer_char(app: &mut App, ch: char) {
-    app.chat.news.composer_push(ch);
 }
 
 pub fn handle_arrow(app: &mut App, key: u8) -> bool {
