@@ -2,6 +2,7 @@ use super::{
     chat, dashboard, help_modal, icon_picker, profile, profile_modal, settings_modal, state::App,
 };
 use crate::app::common::primitives::Screen;
+use crate::app::common::readline::ctrl_byte_to_input;
 use std::{mem, time::Duration};
 use vte::{Params, Parser, Perform};
 
@@ -49,6 +50,11 @@ pub(crate) enum ParsedInput {
     Byte(u8),
     Arrow(u8),
     CtrlArrow(u8),
+    /// Arrow with the Alt/Meta modifier (xterm `CSI 1;3 {A|B|C|D}`).
+    /// Most terminals emit this for Option-Arrow on macOS or Alt-Arrow on
+    /// Linux; kitty does in its default (non-kitty-keyboard) mode. Consumers
+    /// treat `AltArrow` and `CtrlArrow` identically for word-jump bindings.
+    AltArrow(u8),
     Delete,
     CtrlBackspace,
     CtrlDelete,
@@ -256,9 +262,15 @@ impl Perform for VtCollector {
                 self.finish_paste();
             }
             'A' | 'B' | 'C' | 'D' => {
+                // xterm modifier encoding (value = 1 + shift|alt<<1|ctrl<<2):
+                //   3 = Alt, 5 = Ctrl. Others (7 = Alt+Ctrl, 4 = Alt+Shift,
+                //   etc.) fall through to bare Arrow — no consumer
+                //   distinguishes them today.
                 let key = action as u8;
                 if p1 == Some(5) || (p0 == Some(5) && p1.is_none()) {
                     self.events.push(ParsedInput::CtrlArrow(key));
+                } else if p1 == Some(3) || (p0 == Some(3) && p1.is_none()) {
+                    self.events.push(ParsedInput::AltArrow(key));
                 } else {
                     self.events.push(ParsedInput::Arrow(key));
                 }
@@ -697,7 +709,7 @@ fn handle_parsed_input(app: &mut App, event: ParsedInput) {
         ParsedInput::CtrlDelete if ctx.screen == Screen::Chat && ctx.news_composing => {
             app.chat.news.composer_delete_word_right();
         }
-        ParsedInput::CtrlArrow(key)
+        ParsedInput::CtrlArrow(key) | ParsedInput::AltArrow(key)
             if (ctx.screen == Screen::Chat || ctx.screen == Screen::Dashboard)
                 && ctx.chat_composing
                 && !ctx.chat_ac_active =>
@@ -708,7 +720,9 @@ fn handle_parsed_input(app: &mut App, event: ParsedInput) {
                 app.chat.composer_cursor_word_left();
             }
         }
-        ParsedInput::CtrlArrow(key) if ctx.screen == Screen::Chat && ctx.news_composing => {
+        ParsedInput::CtrlArrow(key) | ParsedInput::AltArrow(key)
+            if ctx.screen == Screen::Chat && ctx.news_composing =>
+        {
             if key == b'C' {
                 app.chat.news.composer_cursor_word_right();
             } else if key == b'D' {
@@ -717,6 +731,7 @@ fn handle_parsed_input(app: &mut App, event: ParsedInput) {
         }
         ParsedInput::Delete
         | ParsedInput::CtrlArrow(_)
+        | ParsedInput::AltArrow(_)
         | ParsedInput::CtrlBackspace
         | ParsedInput::CtrlDelete => {}
         ParsedInput::Arrow(key) => {
@@ -946,7 +961,7 @@ fn handle_arrow_for_screen(app: &mut App, screen: Screen, key: u8) -> bool {
 
 fn handle_modal_input(app: &mut App, ctx: InputContext, byte: u8) -> bool {
     if (ctx.screen == Screen::Dashboard || ctx.screen == Screen::Chat) && ctx.chat_composing {
-        chat::input::handle_compose_input(app, byte);
+        chat::input::handle_compose_input(app, byte, compose_room_switch_allowed(ctx.screen));
         return true;
     }
 
@@ -956,6 +971,10 @@ fn handle_modal_input(app: &mut App, ctx: InputContext, byte: u8) -> bool {
     }
 
     false
+}
+
+fn compose_room_switch_allowed(screen: Screen) -> bool {
+    screen == Screen::Chat
 }
 
 fn reset_composers_for_page_change(app: &mut App) {
@@ -1194,14 +1213,21 @@ fn handle_icon_picker_input(app: &mut App, event: ParsedInput) {
         ParsedInput::CtrlDelete => app.icon_picker_state.search_delete_word_right(),
         ParsedInput::Arrow(b'A') => picker_move_selection(app, -1),
         ParsedInput::Arrow(b'B') => picker_move_selection(app, 1),
-        // Ctrl+K / Ctrl+J mirror vim-style up/down without stealing plain j/k from the search box.
+        // Ctrl+K / Ctrl+J mirror vim-style up/down without stealing plain j/k
+        // from the search box. These stay claimed for list nav and are NOT
+        // forwarded to ratatui-textarea's keymap (which would kill-to-EOL /
+        // insert-newline respectively).
         ParsedInput::Byte(0x0B) => picker_move_selection(app, -1),
         ParsedInput::Byte(0x0A) => picker_move_selection(app, 1),
         ParsedInput::Scroll(delta) => picker_move_selection(app, -delta * 3),
         ParsedInput::Arrow(b'C') => app.icon_picker_state.search_cursor_right(),
         ParsedInput::Arrow(b'D') => app.icon_picker_state.search_cursor_left(),
-        ParsedInput::CtrlArrow(b'C') => app.icon_picker_state.search_cursor_word_right(),
-        ParsedInput::CtrlArrow(b'D') => app.icon_picker_state.search_cursor_word_left(),
+        ParsedInput::CtrlArrow(b'C') | ParsedInput::AltArrow(b'C') => {
+            app.icon_picker_state.search_cursor_word_right()
+        }
+        ParsedInput::CtrlArrow(b'D') | ParsedInput::AltArrow(b'D') => {
+            app.icon_picker_state.search_cursor_word_left()
+        }
         ParsedInput::PageUp => {
             let page = app.icon_picker_state.visible_height.get().max(1) as isize;
             picker_move_selection(app, -page);
@@ -1210,7 +1236,8 @@ fn handle_icon_picker_input(app: &mut App, event: ParsedInput) {
             let page = app.icon_picker_state.visible_height.get().max(1) as isize;
             picker_move_selection(app, page);
         }
-        // Ctrl+U / Ctrl+D half-page jumps mirror the chat viewport convention.
+        // Ctrl+U / Ctrl+D half-page jumps mirror the chat viewport convention
+        // and intentionally shadow ratatui-textarea's undo / delete-next-char.
         ParsedInput::Byte(0x15) => {
             let half = (app.icon_picker_state.visible_height.get() / 2).max(1) as isize;
             picker_move_selection(app, -half);
@@ -1219,12 +1246,18 @@ fn handle_icon_picker_input(app: &mut App, event: ParsedInput) {
             let half = (app.icon_picker_state.visible_height.get() / 2).max(1) as isize;
             picker_move_selection(app, half);
         }
-        ParsedInput::Byte(0x01) => app.icon_picker_state.search_cursor_home(),
-        ParsedInput::Byte(0x05) => app.icon_picker_state.search_cursor_end(),
-        ParsedInput::Byte(0x19) => app.icon_picker_state.search_paste(),
+        // ^/ (^_) stays on the app-level undo path so `reset_selection()` fires.
         ParsedInput::Byte(0x1F) => app.icon_picker_state.search_undo(),
         ParsedInput::MousePress { x, y } => handle_icon_picker_click(app, x, y),
         ParsedInput::Char(ch) if !ch.is_control() => app.icon_picker_state.search_insert_char(ch),
+        ParsedInput::Byte(byte) => {
+            // Fallthrough: forward remaining Ctrl+<letter> chords (^A/^E/^F/
+            // ^B/^Y/...) to ratatui-textarea's emacs keymap. The wrapper
+            // resets icon-list selection whenever the query is modified.
+            if let Some(input) = ctrl_byte_to_input(byte) {
+                app.icon_picker_state.search_input(input);
+            }
+        }
         _ => {}
     }
 }
@@ -1382,6 +1415,13 @@ mod tests {
     }
 
     #[test]
+    fn compose_room_switch_only_allowed_on_chat_screen() {
+        assert!(compose_room_switch_allowed(Screen::Chat));
+        assert!(!compose_room_switch_allowed(Screen::Dashboard));
+        assert!(!compose_room_switch_allowed(Screen::Profile));
+    }
+
+    #[test]
     fn vt_parser_reads_arrow_sequence() {
         let mut parser = VtInputParser::default();
         assert_eq!(parser.feed(b"\x1b[A"), vec![ParsedInput::Arrow(b'A')]);
@@ -1481,6 +1521,12 @@ mod tests {
             vec![ParsedInput::CtrlArrow(b'C')]
         );
         assert_eq!(parser.feed(b"\x1b[5D"), vec![ParsedInput::CtrlArrow(b'D')]);
+        // Alt+Arrow (xterm modifier 3). Kitty emits this for Option-Arrow /
+        // Alt-Arrow in its default mode; consumers alias it to word-jump.
+        assert_eq!(parser.feed(b"\x1b[1;3D"), vec![ParsedInput::AltArrow(b'D')]);
+        assert_eq!(parser.feed(b"\x1b[1;3C"), vec![ParsedInput::AltArrow(b'C')]);
+        // Unmodified Arrow falls through unchanged.
+        assert_eq!(parser.feed(b"\x1b[D"), vec![ParsedInput::Arrow(b'D')]);
         assert_eq!(parser.feed(b"\x1b[3~"), vec![ParsedInput::Delete]);
         assert_eq!(parser.feed(b"\x1b[3;5~"), vec![ParsedInput::CtrlDelete]);
         assert_eq!(

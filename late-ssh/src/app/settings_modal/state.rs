@@ -377,10 +377,6 @@ impl SettingsModalState {
         self.bio_input.move_cursor(CursorMove::WordForward);
     }
 
-    pub fn bio_clear(&mut self) {
-        self.bio_input = new_bio_textarea(self.editing_bio);
-    }
-
     pub fn bio_paste(&mut self) {
         let yank = self.bio_input.yank_text();
         insert_bio_text_limited(&mut self.bio_input, &yank);
@@ -388,6 +384,10 @@ impl SettingsModalState {
 
     pub fn bio_undo(&mut self) {
         self.bio_input.undo();
+    }
+
+    pub fn bio_clear(&mut self) {
+        self.bio_input = new_bio_textarea(self.editing_bio);
     }
 
     pub fn cycle_setting(&mut self, forward: bool) {

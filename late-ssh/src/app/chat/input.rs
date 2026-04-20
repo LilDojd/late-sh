@@ -1,4 +1,5 @@
 use crate::app::common::primitives::Banner;
+use crate::app::common::readline::ctrl_byte_to_input;
 use crate::app::help_modal::data::HelpTopic;
 use crate::app::state::App;
 use uuid::Uuid;
@@ -11,7 +12,7 @@ fn is_prev_room_key(byte: u8) -> bool {
     matches!(byte, b'h' | b'H' | 0x10)
 }
 
-pub fn handle_compose_input(app: &mut App, byte: u8) {
+pub fn handle_compose_input(app: &mut App, byte: u8, allow_room_switch: bool) {
     if app.chat.is_autocomplete_active() {
         match byte {
             0x1B => {
@@ -40,13 +41,8 @@ pub fn handle_compose_input(app: &mut App, byte: u8) {
             }
         }
         0x15 => {
-            // Ctrl-U: clear composer
-            app.chat.composer_clear();
-            app.chat.update_autocomplete();
-        }
-        0x19 => {
-            // Ctrl-Y: yank from kill-ring (filled by Alt-D / Ctrl-W word deletes)
-            app.chat.composer_paste();
+            // Readline ^U: kill from cursor to start of current line.
+            app.chat.composer_kill_to_head();
             app.chat.update_autocomplete();
         }
         0x1F => {
@@ -58,7 +54,30 @@ pub fn handle_compose_input(app: &mut App, byte: u8) {
             app.chat.composer_backspace();
             app.chat.update_autocomplete();
         }
-        _ => {}
+        // ^N / ^P switch to the next/previous room without losing the
+        // in-progress draft — useful when you start typing and realize you
+        // meant to be in another room. Reply/edit targets are dropped on
+        // the jump (they point at a message in the prior room); composer
+        // text and cursor survive. Shadows ratatui-textarea's cursor-
+        // down/up, which is rarely useful in a chat composer.
+        0x0E if allow_room_switch => {
+            app.chat.switch_room_preserving_draft(1);
+            app.chat.update_autocomplete();
+        }
+        0x10 if allow_room_switch => {
+            app.chat.switch_room_preserving_draft(-1);
+            app.chat.update_autocomplete();
+        }
+        b => {
+            // Hand remaining Ctrl+<letter> chords to ratatui-textarea so its
+            // built-in emacs keymap owns ^A/^E/^K/^Y/^F/^B/etc. ^W and ^H
+            // are intercepted earlier in app::input for delete-word-left
+            // and don't reach this point.
+            if let Some(input) = ctrl_byte_to_input(b) {
+                app.chat.composer_input(input);
+                app.chat.update_autocomplete();
+            }
+        }
     }
 }
 
