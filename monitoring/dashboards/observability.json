@@ -448,7 +448,8 @@
         {
           "refId": "A",
           "expr": "{service.name=~\"$service\"} severity:ERROR | stats by (\"service.name\", _msg) count() error_logs_total | sort by (error_logs_total desc) | limit 10",
-          "queryType": "instant"
+          "queryType": "stats",
+          "legendFormat": "{{service.name}} - {{_msg}}"
         }
       ],
       "fieldConfig": {
