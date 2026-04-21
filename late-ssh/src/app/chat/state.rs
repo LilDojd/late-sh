@@ -467,6 +467,29 @@ impl ChatState {
         })
     }
 
+    /// Flatten joined rooms into the pick-list the settings modal shows in
+    /// its Favorites tab. Labels are pre-resolved here (DMs → `@peer`, rooms
+    /// → `#slug`, language rooms → `#lang-xx`) so the modal stays ignorant of
+    /// `ChatRoom` internals.
+    pub fn favorite_room_options(&self) -> Vec<crate::app::settings_modal::state::RoomOption> {
+        use crate::app::settings_modal::state::RoomOption;
+        self.rooms
+            .iter()
+            .map(|(room, _)| {
+                let label = if room.kind == "dm" {
+                    format!("@{}", self.dm_display_name(room))
+                } else if let Some(slug) = room.slug.as_deref().filter(|s| !s.is_empty()) {
+                    format!("#{slug}")
+                } else if let Some(code) = room.language_code.as_deref() {
+                    format!("#lang-{code}")
+                } else {
+                    format!("#{}", room.kind)
+                };
+                RoomOption { id: room.id, label }
+            })
+            .collect()
+    }
+
     fn dm_display_name(&self, room: &ChatRoom) -> String {
         dm_sort_key(room, self.user_id, &self.usernames)
     }
@@ -729,8 +752,25 @@ impl ChatState {
         format_active_user_lines(self.active_users.as_ref())
     }
 
-    pub fn submit_composer(&mut self, keep_open: bool) -> Option<Banner> {
+    pub fn submit_composer(&mut self, keep_open: bool, from_dashboard: bool) -> Option<Banner> {
         let body = self.composer.lines().join("\n").trim_end().to_string();
+
+        // Room-membership commands are intentionally chat-page-only: they
+        // operate on `selected_room_id`, which the dashboard never drives.
+        // Rather than silently target the wrong room, refuse here and point
+        // the user at page 2.
+        if from_dashboard && parse_leave_command(&body) {
+            self.clear_composer_after_submit();
+            return Some(Banner::error(
+                "open the chat page (press 2) to leave a room",
+            ));
+        }
+        if from_dashboard && parse_user_command(&body, "/invite").is_some() {
+            self.clear_composer_after_submit();
+            return Some(Banner::error(
+                "open the chat page (press 2) to invite a user",
+            ));
+        }
 
         if body.trim() == "/binds" {
             self.clear_composer_after_submit();
@@ -757,9 +797,14 @@ impl ChatState {
         }
 
         if body.trim() == "/members" {
+            // Resolve the target room BEFORE clearing the composer —
+            // `clear_composer_after_submit` nulls `composer_room_id`, so
+            // reading after would always fall back to the chat-page
+            // `selected_room_id` and miss the dashboard's active favorite.
+            let target = self.composer_room_id.or(self.selected_room_id);
             self.clear_composer_after_submit();
-            let Some(room_id) = self.selected_room_id else {
-                return Some(Banner::error("No room selected"));
+            let Some(room_id) = target else {
+                return Some(Banner::error("no room selected"));
             };
             self.service.list_room_members_task(self.user_id, room_id);
             return None;
@@ -1103,9 +1148,15 @@ impl ChatState {
         let Some(general_id) = self.general_room_id else {
             return &[];
         };
+        self.messages_for_room(general_id)
+    }
+
+    /// Messages for any joined room — used by the dashboard chat card when
+    /// the user pins favorites and cycles between them.
+    pub fn messages_for_room(&self, room_id: Uuid) -> &[ChatMessage] {
         self.rooms
             .iter()
-            .find(|(room, _)| room.id == general_id)
+            .find(|(room, _)| room.id == room_id)
             .map(|(_, msgs)| msgs.as_slice())
             .unwrap_or(&[])
     }
