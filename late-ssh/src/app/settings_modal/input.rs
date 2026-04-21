@@ -181,12 +181,8 @@ fn handle_picker_input(app: &mut App, event: ParsedInput) {
         ParsedInput::Byte(0x1B) => app.settings_modal_state.close_picker(),
         ParsedInput::Byte(b'\r') => app.settings_modal_state.apply_picker_selection(),
         ParsedInput::Byte(0x7F) => app.settings_modal_state.picker_backspace(),
-        ParsedInput::Byte(b'j' | b'J')
-        | ParsedInput::Char('j' | 'J')
-        | ParsedInput::Arrow(b'B') => app.settings_modal_state.picker_move(1),
-        ParsedInput::Byte(b'k' | b'K')
-        | ParsedInput::Char('k' | 'K')
-        | ParsedInput::Arrow(b'A') => app.settings_modal_state.picker_move(-1),
+        ParsedInput::Arrow(b'B') => app.settings_modal_state.picker_move(1),
+        ParsedInput::Arrow(b'A') => app.settings_modal_state.picker_move(-1),
         ParsedInput::PageDown => {
             let page = app
                 .settings_modal_state
