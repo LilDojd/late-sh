@@ -22,6 +22,7 @@ pub(super) struct SymphoniaStreamDecoder {
     sample_buf: Vec<f32>,
     sample_pos: usize,
     spec: AudioSpec,
+    scratch: Option<SampleBuffer<f32>>,
 }
 
 struct PrefixThenRead<R> {
@@ -100,6 +101,7 @@ impl SymphoniaStreamDecoder {
             sample_buf: Vec::new(),
             sample_pos: 0,
             spec,
+            scratch: None,
         })
     }
 
@@ -134,7 +136,7 @@ impl SymphoniaStreamDecoder {
             };
             self.sample_buf.clear();
             self.sample_pos = 0;
-            push_interleaved_samples(&mut self.sample_buf, decoded)?;
+            push_interleaved_samples(&mut self.scratch, &mut self.sample_buf, decoded);
             return Ok(true);
         }
     }
@@ -243,12 +245,25 @@ fn find_mp3_sync_offset(bytes: &[u8]) -> Option<usize> {
     None
 }
 
-fn push_interleaved_samples(out: &mut Vec<f32>, decoded: AudioBufferRef<'_>) -> Result<()> {
+fn push_interleaved_samples(
+    scratch: &mut Option<SampleBuffer<f32>>,
+    out: &mut Vec<f32>,
+    decoded: AudioBufferRef<'_>,
+) {
+    let decoded_capacity = decoded.capacity() as u64;
     let spec = *decoded.spec();
-    let mut buf = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
+    let required_samples = decoded_capacity as usize * spec.channels.count();
+    let needs_realloc = scratch
+        .as_ref()
+        .is_none_or(|buf| buf.capacity() < required_samples);
+    if needs_realloc {
+        *scratch = Some(SampleBuffer::<f32>::new(decoded_capacity, spec));
+    }
+    let buf = scratch
+        .as_mut()
+        .expect("sample buffer initialized above");
     buf.copy_interleaved_ref(decoded);
     out.extend_from_slice(buf.samples());
-    Ok(())
 }
 
 pub(super) fn probe_stream_spec(audio_base_url: &str) -> Result<AudioSpec> {
