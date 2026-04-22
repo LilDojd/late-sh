@@ -1,5 +1,8 @@
 use anyhow::{Context, Result};
-use std::io::{self, Cursor, Read};
+use std::{
+    io::{self, Cursor, Read},
+    time::Duration,
+};
 use symphonia::core::{
     audio::{AudioBufferRef, SampleBuffer},
     codecs::{Decoder, DecoderOptions},
@@ -48,7 +51,10 @@ impl<R: Read> Read for PrefixThenRead<R> {
 impl SymphoniaStreamDecoder {
     pub(super) fn new_http(url: &str) -> Result<Self> {
         let stream_url = url.to_string() + "/stream";
-        let mut resp = reqwest::blocking::get(&stream_url)
+        let client = build_stream_client().context("build http client for audio stream")?;
+        let mut resp = client
+            .get(&stream_url)
+            .send()
             .context("http get")?
             .error_for_status()
             .with_context(|| format!("stream request failed for {stream_url}"))?;
@@ -140,6 +146,14 @@ impl Iterator for SymphoniaStreamDecoder {
         self.sample_pos += 1;
         sample
     }
+}
+
+fn build_stream_client() -> reqwest::Result<reqwest::blocking::Client> {
+    reqwest::blocking::Client::builder()
+        .connect_timeout(Duration::from_secs(5))
+        .tcp_keepalive(Duration::from_secs(15))
+        .tcp_nodelay(true)
+        .build()
 }
 
 fn read_until_mp3_sync<R: Read>(reader: &mut R) -> Result<Vec<u8>> {
