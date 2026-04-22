@@ -5,9 +5,11 @@ use std::{
     env,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU8, AtomicU64},
+        atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
         mpsc,
     },
+    thread,
+    time::Duration,
 };
 use tokio::sync::broadcast;
 
@@ -38,6 +40,11 @@ struct AudioSpec {
     channels: usize,
 }
 
+#[derive(Debug, Default)]
+pub(super) struct AudioStats {
+    pub(super) underrun_frames: AtomicU64,
+}
+
 mod resampler;
 
 use resampler::StreamingLinearResampler;
@@ -65,6 +72,7 @@ impl AudioRuntime {
         let stop = Arc::new(AtomicBool::new(false));
         let muted = Arc::new(AtomicBool::new(false));
         let volume_percent = Arc::new(AtomicU8::new(30));
+        let stats = Arc::new(AudioStats::default());
         let (analyzer_tx, _) = broadcast::channel(32);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
 
@@ -75,6 +83,7 @@ impl AudioRuntime {
             Arc::clone(&played_samples),
             Arc::clone(&muted),
             Arc::clone(&volume_percent),
+            Arc::clone(&stats),
         )?;
         let output_sample_rate = stream.sample_rate;
         let stream = stream.stream;
@@ -86,6 +95,7 @@ impl AudioRuntime {
             Arc::clone(&stop),
             ready_tx,
         );
+        spawn_audio_stats_thread(Arc::clone(&stats), Arc::clone(&stop));
         spawn_playback_analyzer_thread(
             Arc::clone(&played_ring),
             analyzer_tx.clone(),
@@ -124,6 +134,26 @@ impl AudioRuntime {
             enabled: false,
         }
     }
+}
+
+fn spawn_audio_stats_thread(stats: Arc<AudioStats>, stop: Arc<AtomicBool>) {
+    thread::spawn(move || {
+        let interval = Duration::from_secs(5);
+        while !stop.load(Ordering::Relaxed) {
+            thread::sleep(interval);
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
+            let underruns = stats.underrun_frames.swap(0, Ordering::Relaxed);
+            if underruns > 0 {
+                tracing::info!(
+                    underrun_frames = underruns,
+                    window_secs = interval.as_secs(),
+                    "audio stats",
+                );
+            }
+        }
+    });
 }
 
 pub(super) fn audio_startup_hint() -> String {

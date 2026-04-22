@@ -8,7 +8,7 @@ use std::{
     },
 };
 
-use super::AudioSpec;
+use super::{AudioSpec, AudioStats};
 
 pub(super) type PlaybackQueue = Arc<Mutex<VecDeque<f32>>>;
 pub(super) type PlayedRing = Arc<Mutex<VecDeque<f32>>>;
@@ -21,6 +21,7 @@ struct PlaybackOutputState {
     source_channels: usize,
     muted: Arc<AtomicBool>,
     volume_percent: Arc<AtomicU8>,
+    stats: Arc<AudioStats>,
 }
 
 pub(super) struct BuiltOutputStream {
@@ -35,6 +36,7 @@ pub(super) fn build_output_stream(
     played_samples: Arc<AtomicU64>,
     muted: Arc<AtomicBool>,
     volume_percent: Arc<AtomicU8>,
+    stats: Arc<AudioStats>,
 ) -> Result<BuiltOutputStream> {
     let host = cpal::default_host();
     let device = host
@@ -63,6 +65,7 @@ pub(super) fn build_output_stream(
         source_channels: spec.channels,
         muted,
         volume_percent,
+        stats,
     };
 
     let stream = match config.sample_format() {
@@ -196,6 +199,11 @@ where
                 played_ring.pop_front();
             }
             state.played_samples.fetch_add(1, Ordering::Relaxed);
+        } else {
+            state
+                .stats
+                .underrun_frames
+                .fetch_add(1, Ordering::Relaxed);
         }
     }
 }
