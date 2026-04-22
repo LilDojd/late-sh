@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use cpal::traits::StreamTrait;
+use ringbuf::{HeapRb, traits::Split};
 use std::{
     collections::VecDeque,
     env,
@@ -51,7 +52,7 @@ use resampler::StreamingLinearResampler;
 
 mod output;
 
-use output::{PlaybackQueue, PlayedRing, build_output_stream, output_sample_rate_for};
+use output::{PlaybackBuildInputs, PlayedRing, build_output_stream, output_sample_rate_for};
 
 impl AudioRuntime {
     pub(super) async fn start(audio_base_url: String) -> Result<Self> {
@@ -64,9 +65,9 @@ impl AudioRuntime {
             .await
             .context("audio stream probe task failed")??;
         let output_sample_rate = output_sample_rate_for(source_spec)?;
-        let queue = Arc::new(Mutex::new(VecDeque::with_capacity(
-            output_sample_rate as usize * source_spec.channels,
-        )));
+        let ring_capacity_samples =
+            (output_sample_rate as usize * source_spec.channels * 2).max(1);
+        let (prod, cons) = HeapRb::<f32>::new(ring_capacity_samples).split();
         let played_ring = Arc::new(Mutex::new(VecDeque::with_capacity(4096)));
         let played_samples = Arc::new(AtomicU64::new(0));
         let stop = Arc::new(AtomicBool::new(false));
@@ -78,18 +79,20 @@ impl AudioRuntime {
 
         let stream = build_output_stream(
             source_spec,
-            Arc::clone(&queue),
-            Arc::clone(&played_ring),
-            Arc::clone(&played_samples),
-            Arc::clone(&muted),
-            Arc::clone(&volume_percent),
-            Arc::clone(&stats),
+            PlaybackBuildInputs {
+                cons,
+                played_ring: Arc::clone(&played_ring),
+                played_samples: Arc::clone(&played_samples),
+                muted: Arc::clone(&muted),
+                volume_percent: Arc::clone(&volume_percent),
+                stats: Arc::clone(&stats),
+            },
         )?;
         let output_sample_rate = stream.sample_rate;
         let stream = stream.stream;
         spawn_decoder_thread(
             audio_base_url,
-            queue,
+            prod,
             source_spec,
             output_sample_rate,
             Arc::clone(&stop),

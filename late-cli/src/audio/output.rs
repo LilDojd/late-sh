@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait};
+use ringbuf::{HeapCons, traits::Consumer};
 use std::{
     collections::VecDeque,
     sync::{
@@ -10,12 +11,20 @@ use std::{
 
 use super::{AudioSpec, AudioStats};
 
-pub(super) type PlaybackQueue = Arc<Mutex<VecDeque<f32>>>;
+pub(super) type PlaybackConsumer = HeapCons<f32>;
 pub(super) type PlayedRing = Arc<Mutex<VecDeque<f32>>>;
 
-#[derive(Clone)]
+pub(super) struct PlaybackBuildInputs {
+    pub(super) cons: PlaybackConsumer,
+    pub(super) played_ring: PlayedRing,
+    pub(super) played_samples: Arc<AtomicU64>,
+    pub(super) muted: Arc<AtomicBool>,
+    pub(super) volume_percent: Arc<AtomicU8>,
+    pub(super) stats: Arc<AudioStats>,
+}
+
 struct PlaybackOutputState {
-    queue: PlaybackQueue,
+    cons: PlaybackConsumer,
     played_ring: PlayedRing,
     played_samples: Arc<AtomicU64>,
     source_channels: usize,
@@ -31,12 +40,7 @@ pub(super) struct BuiltOutputStream {
 
 pub(super) fn build_output_stream(
     spec: AudioSpec,
-    queue: PlaybackQueue,
-    played_ring: PlayedRing,
-    played_samples: Arc<AtomicU64>,
-    muted: Arc<AtomicBool>,
-    volume_percent: Arc<AtomicU8>,
-    stats: Arc<AudioStats>,
+    inputs: PlaybackBuildInputs,
 ) -> Result<BuiltOutputStream> {
     let host = cpal::default_host();
     let device = host
@@ -58,74 +62,74 @@ pub(super) fn build_output_stream(
     let mut stream_config = config.config();
     apply_platform_buffer_size(&mut stream_config, config.buffer_size());
     let err_fn = |err| eprintln!("audio output stream error: {err}");
-    let output_state = PlaybackOutputState {
-        queue,
-        played_ring,
-        played_samples,
+    let mut output_state = PlaybackOutputState {
+        cons: inputs.cons,
+        played_ring: inputs.played_ring,
+        played_samples: inputs.played_samples,
         source_channels: spec.channels,
-        muted,
-        volume_percent,
-        stats,
+        muted: inputs.muted,
+        volume_percent: inputs.volume_percent,
+        stats: inputs.stats,
     };
 
     let stream = match config.sample_format() {
         cpal::SampleFormat::I8 => device.build_output_stream(
             &stream_config,
-            move |data: &mut [i8], _| write_output_data(data, channels, &output_state),
+            move |data: &mut [i8], _| write_output_data(data, channels, &mut output_state),
             err_fn,
             None,
         )?,
         cpal::SampleFormat::F32 => device.build_output_stream(
             &stream_config,
-            move |data: &mut [f32], _| write_output_data(data, channels, &output_state),
+            move |data: &mut [f32], _| write_output_data(data, channels, &mut output_state),
             err_fn,
             None,
         )?,
         cpal::SampleFormat::I16 => device.build_output_stream(
             &stream_config,
-            move |data: &mut [i16], _| write_output_data(data, channels, &output_state),
+            move |data: &mut [i16], _| write_output_data(data, channels, &mut output_state),
             err_fn,
             None,
         )?,
         cpal::SampleFormat::U16 => device.build_output_stream(
             &stream_config,
-            move |data: &mut [u16], _| write_output_data(data, channels, &output_state),
+            move |data: &mut [u16], _| write_output_data(data, channels, &mut output_state),
             err_fn,
             None,
         )?,
         cpal::SampleFormat::U8 => device.build_output_stream(
             &stream_config,
-            move |data: &mut [u8], _| write_output_data(data, channels, &output_state),
+            move |data: &mut [u8], _| write_output_data(data, channels, &mut output_state),
             err_fn,
             None,
         )?,
         cpal::SampleFormat::I32 => device.build_output_stream(
             &stream_config,
-            move |data: &mut [i32], _| write_output_data(data, channels, &output_state),
+            move |data: &mut [i32], _| write_output_data(data, channels, &mut output_state),
             err_fn,
             None,
         )?,
         cpal::SampleFormat::U32 => device.build_output_stream(
             &stream_config,
-            move |data: &mut [u32], _| write_output_data(data, channels, &output_state),
+            move |data: &mut [u32], _| write_output_data(data, channels, &mut output_state),
             err_fn,
             None,
         )?,
         cpal::SampleFormat::I64 => device.build_output_stream(
             &stream_config,
-            move |data: &mut [i64], _| write_output_data(data, channels, &output_state),
+            move |data: &mut [i64], _| write_output_data(data, channels, &mut output_state),
             err_fn,
             None,
         )?,
         cpal::SampleFormat::U64 => device.build_output_stream(
             &stream_config,
-            move |data: &mut [u64], _| write_output_data(data, channels, &output_state),
+            move |data: &mut [u64], _| write_output_data(data, channels, &mut output_state),
             err_fn,
             None,
         )?,
         cpal::SampleFormat::F64 => device.build_output_stream(
             &stream_config,
-            move |data: &mut [f64], _| write_output_data(data, channels, &output_state),
+            move |data: &mut [f64], _| write_output_data(data, channels, &mut output_state),
             err_fn,
             None,
         )?,
@@ -156,11 +160,10 @@ pub(super) fn output_sample_rate_for(spec: AudioSpec) -> Result<u32> {
     Ok(config.sample_rate().0)
 }
 
-fn write_output_data<T>(output: &mut [T], channels: usize, state: &PlaybackOutputState)
+fn write_output_data<T>(output: &mut [T], channels: usize, state: &mut PlaybackOutputState)
 where
     T: cpal::SizedSample + cpal::FromSample<f32>,
 {
-    let mut queue = state.queue.lock().unwrap_or_else(|e| e.into_inner());
     let mut played_ring = state.played_ring.lock().unwrap_or_else(|e| e.into_inner());
     let muted = state.muted.load(Ordering::Relaxed);
     let linear = state.volume_percent.load(Ordering::Relaxed) as f32 / 100.0;
@@ -171,7 +174,7 @@ where
         let mut source_frame = vec![0.0f32; source_channels];
         let mut pulled = 0usize;
         for slot in &mut source_frame {
-            if let Some(sample) = queue.pop_front() {
+            if let Some(sample) = state.cons.try_pop() {
                 *slot = sample;
                 pulled += 1;
             } else {
@@ -200,10 +203,7 @@ where
             }
             state.played_samples.fetch_add(1, Ordering::Relaxed);
         } else {
-            state
-                .stats
-                .underrun_frames
-                .fetch_add(1, Ordering::Relaxed);
+            state.stats.underrun_frames.fetch_add(1, Ordering::Relaxed);
         }
     }
 }
