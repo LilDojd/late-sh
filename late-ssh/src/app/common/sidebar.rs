@@ -65,6 +65,7 @@ fn draw_screen_card(frame: &mut Frame, area: Rect, screen: Screen) {
         (Screen::Dashboard, "1"),
         (Screen::Chat, "2"),
         (Screen::Games, "3"),
+        (Screen::Artboard, "4"),
     ];
 
     let mut spans = Vec::new();
@@ -89,6 +90,7 @@ fn draw_screen_card(frame: &mut Frame, area: Rect, screen: Screen) {
         Screen::Dashboard => "Dashboard",
         Screen::Chat => "Chat",
         Screen::Games => "Games",
+        Screen::Artboard => "Artboard",
     };
 
     let block = Block::default()

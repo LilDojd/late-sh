@@ -6,14 +6,15 @@ use late_core::api_types::NowPlaying;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::Style,
+    style::{Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Clear},
 };
 
 use late_core::models::leaderboard::LeaderboardData;
 
 use super::{
-    chat,
+    artboard, chat,
     common::{
         primitives::{Banner, BannerKind, Screen, draw_banner},
         sidebar::{SidebarProps, draw_sidebar, sidebar_clock_text},
@@ -100,6 +101,8 @@ struct DrawContext<'a> {
     solitaire_state: &'a crate::app::games::solitaire::state::State,
     minesweeper_state: &'a crate::app::games::minesweeper::state::State,
     blackjack_state: &'a crate::app::games::blackjack::state::State,
+    dartboard_state: Option<&'a crate::app::artboard::state::State>,
+    artboard_interacting: bool,
     leaderboard: &'a Arc<LeaderboardData>,
     visualizer: &'a Visualizer,
     now_playing: Option<&'a NowPlaying>,
@@ -313,6 +316,8 @@ impl App {
                         solitaire_state: &self.solitaire_state,
                         minesweeper_state: &self.minesweeper_state,
                         blackjack_state: &self.blackjack_state,
+                        dartboard_state: self.dartboard_state.as_ref(),
+                        artboard_interacting: self.artboard_interacting,
                         leaderboard: &self.leaderboard,
                         visualizer,
                         now_playing: now_playing.as_ref(),
@@ -478,7 +483,7 @@ impl App {
         }
 
         let block = Block::default()
-            .title(" late.sh ")
+            .title(app_frame_title(screen, &ctx))
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme::BORDER_ACTIVE()));
 
@@ -499,6 +504,11 @@ impl App {
                 dashboard::ui::draw_dashboard(frame, content_area, ctx.dashboard_view)
             }
             Screen::Chat => chat::ui::draw_chat(frame, content_area, ctx.chat_view),
+            Screen::Artboard => {
+                if let Some(state) = ctx.dartboard_state {
+                    artboard::ui::draw_game(frame, content_area, state, ctx.artboard_interacting);
+                }
+            }
             Screen::Games => crate::app::games::ui::draw_games_hub(
                 frame,
                 content_area,
@@ -605,6 +615,65 @@ impl App {
             icon_picker::picker::render(frame, area, ctx.icon_picker_state, catalog);
         }
     }
+}
+
+fn app_frame_title(screen: Screen, ctx: &DrawContext<'_>) -> Line<'static> {
+    let mut spans = vec![Span::styled(
+        " late.sh ",
+        Style::default()
+            .fg(theme::TEXT_BRIGHT())
+            .add_modifier(Modifier::BOLD),
+    )];
+
+    let page_title = match screen {
+        Screen::Dashboard => "Dashboard",
+        Screen::Chat => "Chat",
+        Screen::Games => "The Arcade",
+        Screen::Artboard => "Artboard",
+    };
+    spans.push(Span::styled("| ", Style::default().fg(theme::BORDER_DIM())));
+    spans.push(Span::styled(
+        format!("{page_title} "),
+        Style::default().fg(theme::TEXT_MUTED()),
+    ));
+
+    if screen == Screen::Artboard {
+        spans.push(Span::styled(
+            "by @mevanlc ",
+            Style::default().fg(theme::TEXT_DIM()),
+        ));
+        let hints: &[(&str, &str)] = if ctx.artboard_interacting {
+            &[
+                ("active", "draw"),
+                ("Esc", "view"),
+                ("Ctrl+\\", "owners"),
+                ("Ctrl+P", "help"),
+            ]
+        } else {
+            &[
+                ("view", "pan"),
+                ("Alt+arrows", "pan"),
+                ("R-drag", "pan"),
+                ("i", "edit"),
+                ("Ctrl+\\", "owners"),
+            ]
+        };
+        for (key, desc) in hints {
+            spans.push(Span::styled("· ", Style::default().fg(theme::BORDER_DIM())));
+            spans.push(Span::styled(
+                *key,
+                Style::default()
+                    .fg(theme::AMBER_DIM())
+                    .add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(
+                format!(" {desc} "),
+                Style::default().fg(theme::TEXT_DIM()),
+            ));
+        }
+    }
+
+    Line::from(spans)
 }
 
 #[cfg(test)]

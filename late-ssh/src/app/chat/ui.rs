@@ -266,14 +266,7 @@ fn composer_placeholder_lines(view: &ComposerBlockView<'_>) -> usize {
 }
 
 pub fn draw_dashboard_chat_card(frame: &mut Frame, area: Rect, view: DashboardChatView<'_>) {
-    let block = Block::default()
-        .title(" Chat ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::BORDER()));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let composer_text_width = inner.width.saturating_sub(4).max(1) as usize;
+    let composer_text_width = area.width.saturating_sub(2).max(1) as usize;
     let total_composer_lines = chat_composer_lines_for_height(view.composer, composer_text_width)
         .max(composer_placeholder_lines(&ComposerBlockView {
             composer: view.composer,
@@ -293,7 +286,7 @@ pub fn draw_dashboard_chat_card(frame: &mut Frame, area: Rect, view: DashboardCh
         Constraint::Length(1),
         Constraint::Length(composer_height),
     ])
-    .split(inner);
+    .split(area);
     let messages_area = layout[0];
     let composer_area = Some(layout[2]);
 
@@ -761,22 +754,16 @@ pub fn draw_chat(frame: &mut Frame, area: Rect, view: ChatRenderInput<'_>) {
     let composing = view.composing;
     let current_user_id = view.current_user_id;
     let news_selected = view.news_selected;
-    let block = Block::default()
-        .title(" Chat ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::BORDER()));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
 
     if chat_rooms.is_empty() {
         let empty = Paragraph::new("No chat rooms yet.")
             .style(Style::default().fg(theme::TEXT_DIM()))
             .centered();
-        frame.render_widget(empty, inner);
+        frame.render_widget(empty, area);
         return;
     }
 
-    let composer_text_width = inner.width.saturating_sub(4).max(1) as usize;
+    let composer_text_width = area.width.saturating_sub(2).max(1) as usize;
     let total_composer_lines = if view.notifications_selected || view.discover_selected {
         1
     } else if news_selected {
@@ -799,7 +786,7 @@ pub fn draw_chat(frame: &mut Frame, area: Rect, view: ChatRenderInput<'_>) {
     let visible_composer_lines = total_composer_lines.min(5);
     let composer_height = visible_composer_lines as u16 + 2;
     let layout =
-        Layout::vertical([Constraint::Fill(1), Constraint::Length(composer_height)]).split(inner);
+        Layout::vertical([Constraint::Fill(1), Constraint::Length(composer_height)]).split(area);
     let body = layout[0];
     let composer_area = layout[1];
     let body_layout = Layout::horizontal([Constraint::Length(26), Constraint::Fill(1)]).split(body);

@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use late_core::audio::VizFrame;
 
-use super::state::App;
+use super::state::{App, GAME_SELECTION_TETRIS};
 use crate::app::common::primitives::Screen;
 use crate::session::{BrowserVizFrame, SessionMessage};
 
@@ -33,8 +33,7 @@ impl App {
         self.sync_visible_chat_room();
         if self.chat.pending_chat_screen_switch {
             self.chat.pending_chat_screen_switch = false;
-            self.screen = Screen::Chat;
-            self.sync_visible_chat_room();
+            self.set_screen(Screen::Chat);
         }
         if let Some(b) = self.vote.tick() {
             self.banner = Some(b);
@@ -68,10 +67,16 @@ impl App {
             }
         }
 
-        if self.screen == Screen::Games && self.is_playing_game && self.game_selection == 1 {
+        if self.screen == Screen::Games
+            && self.is_playing_game
+            && self.game_selection == GAME_SELECTION_TETRIS
+        {
             self.tetris_state.tick();
         }
         self.blackjack_state.tick();
+        if let Some(state) = self.dartboard_state.as_mut() {
+            state.tick();
+        }
         self.chip_balance = self.blackjack_state.balance;
 
         // Leaderboard

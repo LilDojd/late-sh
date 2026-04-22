@@ -105,6 +105,7 @@ pub struct ChatState {
     pub(crate) pending_notifications: Vec<PendingNotification>,
     requested_help_topic: Option<HelpTopic>,
     requested_settings_modal: bool,
+    requested_quit: bool,
 }
 
 pub(crate) struct PendingNotification {
@@ -176,6 +177,7 @@ impl ChatState {
             pending_notifications: Vec::new(),
             requested_help_topic: None,
             requested_settings_modal: false,
+            requested_quit: false,
         }
     }
 
@@ -279,6 +281,10 @@ impl ChatState {
 
     pub fn take_requested_settings_modal(&mut self) -> bool {
         std::mem::take(&mut self.requested_settings_modal)
+    }
+
+    pub fn take_requested_quit(&mut self) -> bool {
+        std::mem::take(&mut self.requested_quit)
     }
 
     fn select_from_ids(&mut self, ids: &[Uuid], delta: isize) {
@@ -806,6 +812,12 @@ impl ChatState {
         if body.trim() == "/settings" {
             self.clear_composer_after_submit();
             self.requested_settings_modal = true;
+            return None;
+        }
+
+        if body.trim() == "/exit" {
+            self.clear_composer_after_submit();
+            self.requested_quit = true;
             return None;
         }
 
@@ -1888,6 +1900,7 @@ fn reply_preview_text(body: &str) -> String {
 
 pub(crate) fn new_chat_textarea() -> TextArea<'static> {
     let mut ta = TextArea::default();
+    ta.set_style(Style::default().fg(theme::TEXT()));
     ta.set_placeholder_text("Type a message...");
     ta.set_placeholder_style(Style::default().fg(theme::TEXT_DIM()));
     ta.set_cursor_line_style(Style::default());
@@ -2151,6 +2164,12 @@ mod tests {
     #[test]
     fn parse_dm_trims_whitespace() {
         assert_eq!(parse_dm_command("/dm  @alice  "), Some("alice"));
+    }
+
+    #[test]
+    fn new_chat_textarea_uses_theme_text_color() {
+        let textarea = new_chat_textarea();
+        assert_eq!(textarea.style().fg, Some(theme::TEXT()));
     }
 
     #[test]
