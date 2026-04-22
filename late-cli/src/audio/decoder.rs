@@ -104,22 +104,50 @@ impl SymphoniaStreamDecoder {
     }
 
     fn refill(&mut self) -> Result<bool> {
+        use symphonia::core::errors::Error;
+
         loop {
             let packet = match self.format.next_packet() {
                 Ok(packet) => packet,
-                Err(symphonia::core::errors::Error::IoError(_)) => return Ok(false),
+                Err(Error::IoError(_)) => return Ok(false),
+                Err(Error::ResetRequired) => {
+                    self.rebuild_decoder()?;
+                    continue;
+                }
                 Err(err) => return Err(err.into()),
             };
             if packet.track_id() != self.track_id {
                 continue;
             }
 
-            let decoded = self.decoder.decode(&packet)?;
+            let decoded = match self.decoder.decode(&packet) {
+                Ok(decoded) => decoded,
+                Err(Error::DecodeError(msg)) => {
+                    tracing::warn!(error = %msg, "skipping bad MP3 packet");
+                    continue;
+                }
+                Err(Error::ResetRequired) => {
+                    self.rebuild_decoder()?;
+                    continue;
+                }
+                Err(err) => return Err(err.into()),
+            };
             self.sample_buf.clear();
             self.sample_pos = 0;
             push_interleaved_samples(&mut self.sample_buf, decoded)?;
             return Ok(true);
         }
+    }
+
+    fn rebuild_decoder(&mut self) -> Result<()> {
+        let track = self
+            .format
+            .default_track()
+            .context("no default track after reset")?;
+        self.decoder = get_codecs()
+            .make(&track.codec_params, &DecoderOptions::default())
+            .context("failed to rebuild decoder after reset")?;
+        Ok(())
     }
 
     fn spec(&self) -> AudioSpec {
